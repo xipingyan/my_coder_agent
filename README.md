@@ -20,7 +20,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 # One click start
 
-#### vLLM for 
+#### vLLM for Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
 ```
 <!-- 一键启动 -->
 ./manage_vllm.sh start
@@ -41,10 +41,11 @@ curl -fsSL https://ollama.com/install.sh | sh
 nvidia-smi --query-gpu=index,name,compute_cap --format=csv
 ```
 
-#### OLLAMA for
+#### OLLAMA for unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf
 
 ```
-
+manage_ollma.sh start
+manage_ollma.sh stop
 ```
 
 # 配置插件 Continue
@@ -61,7 +62,21 @@ version: 1.0.0
 schema: v1
 
 models:
-  - name: "Qwen2.5-Coder-32B"
+  # 1. 新增的 Ollama (Qwen3.8-27B)
+  - name: "Qwen3.8-27B (Ollama)"
+    provider: openai
+    model: qwen3.8-27b
+    apiBase: "http://10.112.106.102:8000/v1"
+    apiKey: "EMPTY"
+    contextLength: 40960
+    completionOptions:
+      temperature: 0.2
+    roles:
+      - chat
+      - edit
+
+  # 2. 原有的 vLLM (Qwen2.5-Coder-32B)
+  - name: "Qwen2.5-Coder-32B (vLLM)"
     provider: openai
     model: qwen-coder-32b
     apiBase: "http://10.112.106.102:8000/v1"
@@ -76,7 +91,8 @@ models:
 tabAutocompleteModel:
   name: "Qwen2.5-Coder-32B Autocomplete"
   provider: openai
-  model: qwen-coder-32b
+  # model: qwen-coder-32b
+  model: qwen3.8-27b
   apiBase: "http://10.112.106.102:8000/v1"
   apiKey: "EMPTY"
 ```

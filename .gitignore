@@ -3,3 +3,5 @@ vllm-env
 *.log
 *.pid
 nohup.out
+unsloth
+Modelfile
