@@ -3,32 +3,38 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 # ==================== 用户配置区 ====================
-# 1. 指向本地 GGUF 模型文件的绝对路径
-MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf"
-
-# 2. 注册到 Ollama 内部的模型别名
+MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q5_K_XL.gguf"
 SERVED_MODEL_NAME="qwen3.8-27b"
 
-# 3. 指定使用的 GPU ID
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES=0
 
-# 4. 服务运行 IP 与端口（OLLAMA_HOST 同时控制绑定 IP 和端口）
-ServerIP="10.112.106.102"
+ServerIP="0.0.0.0"
 PORT="8000"
 export OLLAMA_HOST="${ServerIP}:${PORT}"
-
-# 5. 禁止 Ollama 自动卸载显存（-1 代表永久常驻 RTX 3090 显存）
 export OLLAMA_KEEP_ALIVE="-1"
 
-# 6. 日志、PID 与临时配置文件路径
 LOG_FILE="${SCRIPT_DIR}/ollama_server.log"
 PID_FILE="${SCRIPT_DIR}/ollama_server.pid"
 MODELFILE_PATH="${SCRIPT_DIR}/Modelfile"
 # ====================================================
 
+# 核心辅助函数：精准校验服务是否真正在运行
+is_running() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        # 不仅检查 PID 存活，还检查该进程是否真的是 ollama serve
+        if kill -0 "$PID" 2>/dev/null && ps -p "$PID" -o args= | grep -q "ollama serve"; then
+            return 0
+        else
+            # 进程不存在或不是 ollama，说明是僵尸 PID 文件，自动清理
+            rm -f "$PID_FILE"
+        fi
+    fi
+    return 1
+}
+
 check_and_import_model() {
-    # 检查模型是否已经在 Ollama 中注册
     if ! ollama list 2>/dev/null | grep -q "$SERVED_MODEL_NAME"; then
         echo "[+] 正在为 GGUF 模型生成 Modelfile 并导入 Ollama..."
         cat << EOF > "$MODELFILE_PATH"
@@ -47,8 +53,14 @@ EOF
 
 case "$1" in
     start)
-        if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        if is_running; then
             echo "[!] Ollama 服务已经在运行中，PID: $(cat $PID_FILE)"
+            exit 1
+        fi
+
+        # 检查端口是否被占用
+        if ss -tlnp 2>/dev/null | grep -q ":${PORT} " || netstat -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+            echo "[!] 端口 $PORT 已被占用，请先排查占用端口的进程或等待网络释放。"
             exit 1
         fi
 
@@ -56,18 +68,22 @@ case "$1" in
         echo "[+] 服务地址: http://$OLLAMA_HOST"
         echo "[+] 日志输出: $LOG_FILE"
 
-        # 后台启动 Ollama 服务进程
         nohup ollama serve > "$LOG_FILE" 2>&1 &
         PID=$!
         echo $PID > "$PID_FILE"
         
-        # 等待后台服务完成套接字绑定
         sleep 3
 
-        # 检查并自动导入 GGUF 模型
+        # 再次检查进程是否存活（防止启动瞬间崩溃）
+        if ! kill -0 $PID 2>/dev/null; then
+            echo "[✗] Ollama 服务启动失败！请查看日志排查原因："
+            tail -n 10 "$LOG_FILE"
+            rm -f "$PID_FILE"
+            exit 1
+        fi
+
         check_and_import_model
 
-        # 预热并加载模型至显存
         echo "[+] 正在将模型预加载至 GPU 显存..."
         ollama run "$SERVED_MODEL_NAME" "" > /dev/null 2>&1
 
@@ -75,19 +91,29 @@ case "$1" in
         ;;
 
     stop)
-        if [ ! -f "$PID_FILE" ]; then
-            echo "[!] 找不到 PID 文件，服务可能未运行。"
-            exit 1
+        if ! is_running; then
+            echo "[!] Ollama 服务未运行或已崩溃。"
+            exit 0
         fi
+        
         PID=$(cat "$PID_FILE")
         echo "[-] 正在停止 Ollama 服务 (PID: $PID)..."
-        kill $PID
         
-        while kill -0 $PID 2>/dev/null; do
+        # 优雅停止，忽略进程不存在的错误
+        kill "$PID" 2>/dev/null || true
+        
+        for i in {1..10}; do
+            if ! kill -0 "$PID" 2>/dev/null; then break; fi
             sleep 1
             echo -n "."
         done
         echo ""
+        
+        # 10秒没死透则强杀兜底
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "[-] 进程未响应，正在强制终止..."
+            kill -9 "$PID" 2>/dev/null || true
+        fi
         
         rm -f "$PID_FILE"
         echo "[✓] 服务已停止，显存已释放。"
@@ -100,9 +126,8 @@ case "$1" in
         ;;
 
     status)
-        if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        if is_running; then
             echo "[✓] Ollama 服务正在运行，PID: $(cat $PID_FILE)"
-            # 测试 OpenAI 兼容接口 (/v1/models) 是否可响应
             curl -s http://$OLLAMA_HOST/v1/models | grep -q "$SERVED_MODEL_NAME" && echo "[✓] API 端口正常响应！" || echo "[!] API 服务正在初始化中..."
         else
             echo "[!] Ollama 服务未运行。"
