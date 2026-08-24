@@ -10,6 +10,9 @@ source vllm-env/bin/activate
 # 安装 vLLM (AWQ 量化支持已内置在 vLLM 中，直接安装即可)
 uv pip install vllm
 
+<!-- OLLAMA -->
+curl -fsSL https://ollama.com/install.sh | sh
+
 <!-- Donwload model: Qwen/Qwen2.5-Coder-32B-Instruct-AWQ -->
 ./download_model.sh
 
@@ -17,6 +20,7 @@ uv pip install vllm
 
 # One click start
 
+#### vLLM for 
 ```
 <!-- 一键启动 -->
 ./manage_vllm.sh start
@@ -35,6 +39,12 @@ uv pip install vllm
 ``Note: `` 多张显卡时，使用如下命令查看对应的显卡id.
 ```
 nvidia-smi --query-gpu=index,name,compute_cap --format=csv
+```
+
+#### OLLAMA for
+
+```
+
 ```
 
 # 配置插件 Continue

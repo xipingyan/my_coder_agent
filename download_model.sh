@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/vllm-env/bin/activate"
 # uv pip install --index-url https://pypi.org/simple -U huggingface-hub
 
 model_id='Qwen/Qwen2.5-Coder-32B-Instruct-AWQ'
+model_id='unsloth/Qwen3.8-27B-GGUF MTP Qwen3.8-27B-UD-Q4_K_XL.gguf config.json imatrix_unsloth.gguf mmproj-BF16.gguf mmproj-F16.gguf'
 
 # Refer: https://hf-mirror.com/
 export HF_ENDPOINT=https://hf-mirror.com
