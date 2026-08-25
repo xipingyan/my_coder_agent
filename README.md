@@ -100,3 +100,18 @@ tabAutocompleteModel:
 Note:
 1: For server side, please the config.yaml to ~/.continue/config.yaml
 2: Replace your IP from host to 10.112.106.102
+
+# 配置插件 Cline (Recommend)
+
+Install Cline in VSCode.
+
+config:
+
+| 配置项	| 值 |
+--------------------------------------------------------
+| API Provider | OpenAI Compatible（⚠️ 千万不要选 Ollama） | 
+| Base URL	   | http://192.168.1.25:8000/v1 | 
+| API Key		   | EMPTY 或 dummy 或 not-needed | 
+| Model ID		 | qwen3.8-27b | 
+| Model Context Window | 40960（和 Continue 一致） | 
+| Request Timeout	     | 30000 | 
