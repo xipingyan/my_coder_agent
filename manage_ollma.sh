@@ -3,13 +3,15 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 # ==================== 用户配置区 ====================
-MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q5_K_XL.gguf"
+# MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf"
+MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q8_K_L.gguf"
 SERVED_MODEL_NAME="qwen3.8-27b"
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
-ServerIP="0.0.0.0"
+# 不能使用[0,0,0,0]
+ServerIP="10.112.106.102"
 PORT="8000"
 export OLLAMA_HOST="${ServerIP}:${PORT}"
 export OLLAMA_KEEP_ALIVE="-1"
@@ -35,19 +37,25 @@ is_running() {
 }
 
 check_and_import_model() {
-    if ! ollama list 2>/dev/null | grep -q "$SERVED_MODEL_NAME"; then
-        echo "[+] 正在为 GGUF 模型生成 Modelfile 并导入 Ollama..."
-        cat << EOF > "$MODELFILE_PATH"
+    if [ ! -f "$MODEL_PATH" ]; then
+        echo "[!] 错误：GGUF 模型文件不存在，请检查路径: $MODEL_PATH"
+        exit 1
+    fi
+
+    export OLLAMA_HOST="$CLIENT_HOST"
+
+    # 强制覆盖导入，确保改动 MODEL_PATH 后能实时生效
+    echo "[+] 正在针对当前 GGUF 文件生成 Modelfile 并导入 Ollama..."
+    cat << EOF > "$MODELFILE_PATH"
 FROM ${MODEL_PATH}
 PARAMETER num_ctx 40960
 EOF
-        ollama create "$SERVED_MODEL_NAME" -f "$MODELFILE_PATH"
-        if [ $? -eq 0 ]; then
-            echo "[✓] 模型 ${SERVED_MODEL_NAME} 导入成功！"
-        else
-            echo "[!] 模型导入失败，请检查 GGUF 文件路径是否正确。"
-            exit 1
-        fi
+    ollama create "$SERVED_MODEL_NAME" -f "$MODELFILE_PATH"
+    if [ $? -eq 0 ]; then
+        echo "[✓] 模型 ${SERVED_MODEL_NAME} 导入/更新成功！"
+    else
+        echo "[!] 模型导入失败，详细信息请查看日志: cat $LOG_FILE"
+        exit 1
     fi
 }
 
