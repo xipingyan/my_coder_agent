@@ -3,12 +3,22 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 # ==================== 用户配置区 ====================
-# MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf"
+# MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K.gguf"
 MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q8_K_L.gguf"
 SERVED_MODEL_NAME="qwen3.8-27b"
 
-export CUDA_DEVICE_ORDER=PCI_BUS_ID
+# OS 临时路径磁盘空间已满时
+export LOCAL_TMP=/mnt/data_nvme1n1p1/xiping_workpath/my_coder_agent/tmp
+export LOCAL_TMP_OLLMA_MODELS=${LOCAL_TMP}/ollama_models
+mkdir -p ${LOCAL_TMP}
+mkdir -p ${LOCAL_TMP_OLLMA_MODELS}
+export TMPDIR=${LOCAL_TMP}
+export OLLAMA_MODELS=${LOCAL_TMP_OLLMA_MODELS}
+
+# export CUDA_DEVICE_ORDER=PCI_BUS_ID
+# --- 设置显卡可见性 ---
 export CUDA_VISIBLE_DEVICES=1
+export OLLAMA_VULKAN=false
 
 # 不能使用[0,0,0,0]
 ServerIP="10.112.106.102"
