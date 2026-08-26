@@ -8,8 +8,12 @@ source "$SCRIPT_DIR/vllm-env/bin/activate"
 # pip install openvino-tokenizers openvino nncf optimum[intel]
 # uv pip install --index-url https://pypi.org/simple -U huggingface-hub
 
-model_id='Qwen/Qwen2.5-Coder-32B-Instruct-AWQ'
-model_id='unsloth/Qwen3.8-27B-GGUF MTP Qwen3.8-27B-UD-Q4_K_XL.gguf config.json imatrix_unsloth.gguf mmproj-BF16.gguf mmproj-F16.gguf'
+# model_id='Qwen/Qwen2.5-Coder-32B-Instruct-AWQ'
+# model_id='unsloth/Qwen3.8-27B-GGUF MTP Qwen3.8-27B-UD-Q5_K_XL.gguf config.json imatrix_unsloth.gguf mmproj-BF16.gguf mmproj-F16.gguf'
+# model_id='bartowski/Qwen2.5-Coder-32B-Instruct-GGUF Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf'
+
+model_id='bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF DeepSeek-Coder-V2-Lite-Instruct-Q6_K_L.gguf'
+
 
 # Refer: https://hf-mirror.com/
 export HF_ENDPOINT=https://hf-mirror.com
