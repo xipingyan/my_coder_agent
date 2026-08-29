@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/vllm-env/bin/activate"
 # model_id='bartowski/Qwen2.5-Coder-32B-Instruct-GGUF Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf'
 
 model_id='bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF DeepSeek-Coder-V2-Lite-Instruct-Q6_K_L.gguf'
-
+model_id='OpenVINO/Qwen3.8-27B-int4-ov'
 
 # Refer: https://hf-mirror.com/
 export HF_ENDPOINT=https://hf-mirror.com

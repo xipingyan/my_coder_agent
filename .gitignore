@@ -5,3 +5,5 @@ vllm-env
 nohup.out
 unsloth
 Modelfile
+OpenVINO
+ovms_cache
