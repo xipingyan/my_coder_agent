@@ -63,7 +63,7 @@ check_and_import_model() {
     echo "[+] 正在针对当前 GGUF 文件生成 Modelfile (num_ctx 40960) 并导入..."
     cat << EOF > "$MODELFILE_PATH"
 FROM ${MODEL_PATH}
-PARAMETER num_ctx 40960
+PARAMETER num_ctx 131072
 EOF
 
     ollama create "$SERVED_MODEL_NAME" -f "$MODELFILE_PATH"
