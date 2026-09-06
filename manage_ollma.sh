@@ -6,10 +6,26 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K.gguf"
 SERVED_MODEL_NAME="qwen3.8-27b"
 
+# 思考模式开关 (true: 开启思考, false: 关闭思考)
+ENABLE_THINKING="false"
+
+export OLLAMA_FLASH_ATTENTION=true
+
 # 临时路径配置
 export LOCAL_TMP=/mnt/data_nvme1n1p1/xiping_workpath/my_coder_agent/tmp
 mkdir -p ${LOCAL_TMP}
 export TMPDIR=${LOCAL_TMP}
+
+# 思考模式底层环境变量配置 (控制 llama-server 推理核心层)
+if [ "$ENABLE_THINKING" = "false" ]; then
+    export LLAMA_ARG_REASONING="off"
+    export LLAMA_ARG_THINK_BUDGET="0"
+    export LLAMA_ARG_THINK="none"
+else
+    unset LLAMA_ARG_REASONING
+    unset LLAMA_ARG_THINK_BUDGET
+    unset LLAMA_ARG_THINK
+fi
 
 # --- 设置显卡与 Vulkan 禁用 ---
 export CUDA_VISIBLE_DEVICES=1
@@ -59,8 +75,7 @@ check_and_import_model() {
         exit 1
     fi
 
-    # 修复：移除错误的 CLIENT_HOST，确保继承外部全局 OLLAMA_HOST
-    echo "[+] 正在针对当前 GGUF 文件生成 Modelfile (num_ctx 40960) 并导入..."
+    echo "[+] 正在针对当前 GGUF 文件生成 Modelfile (num_ctx 131072) 并导入..."
     cat << EOF > "$MODELFILE_PATH"
 FROM ${MODEL_PATH}
 PARAMETER num_ctx 131072
@@ -100,6 +115,19 @@ case "$1" in
         if ss -tlnp 2>/dev/null | grep -q ":${PORT} " || netstat -tlnp 2>/dev/null | grep -q ":${PORT} "; then
             echo "[!] 端口 $PORT 已被占用，请先排查占用端口的进程。"
             exit 1
+        fi
+
+        # 思考模式控制环境变量 (底层 llama-server 推理核心层)
+        if [ "$ENABLE_THINKING" = "false" ]; then
+            echo "[+] 思考模式 : 关闭 (LLAMA_ARG_REASONING=off, LLAMA_ARG_THINK_BUDGET=0)"
+            export LLAMA_ARG_REASONING="off"
+            export LLAMA_ARG_THINK_BUDGET="0"
+            export LLAMA_ARG_THINK="none"
+        else
+            echo "[+] 思考模式 : 开启 (LLAMA_ARG_REASONING=auto)"
+            unset LLAMA_ARG_REASONING
+            unset LLAMA_ARG_THINK_BUDGET
+            unset LLAMA_ARG_THINK
         fi
 
         echo "[+] 正在启动 Ollama 服务 (CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES})..."
