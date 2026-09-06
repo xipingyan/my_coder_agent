@@ -12,7 +12,7 @@ ENABLE_THINKING="false"
 export OLLAMA_FLASH_ATTENTION=true
 
 # 临时路径配置
-export LOCAL_TMP=/mnt/data_nvme1n1p1/xiping_workpath/my_coder_agent/tmp
+export LOCAL_TMP=${SCRIPT_DIR}/tmp
 mkdir -p ${LOCAL_TMP}
 export TMPDIR=${LOCAL_TMP}
 
