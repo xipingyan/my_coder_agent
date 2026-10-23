@@ -1,68 +1,88 @@
 import argparse
 import base64
+import io
 import os
 from openai import OpenAI
+from PIL import Image
 
 
-def encode_image(image_path):
-  """将本地图片文件转换为 Base64 编码字符串"""
+def encode_image_safely(image_path):
+  """读取本地图片，统一转为标准 RGB JPEG 格式并编码为 Base64，
+
+  彻底避免 PNG 透明通道、RGBA 或调色板格式导致 OVMS 后端解码成白图。
+  """
   if not os.path.exists(image_path):
     raise FileNotFoundError(f"找不到图片文件: {image_path}")
-  with open(image_path, "rb") as image_file:
-    return base64.b64encode(image_file.read()).decode("utf-8")
+
+  with Image.open(image_path) as img:
+    print(
+        f"[DEBUG] 原始图片: {image_path} | 格式: {img.format} | 模式:"
+        f" {img.mode} | 尺寸: {img.size}"
+    )
+    # 如果是 RGBA, LA 或调色板模式 (P)，转换为纯 RGB
+    if img.mode in ("RGBA", "LA", "P"):
+      print("[DEBUG] 检测到非 RGB 颜色空间/透明通道，正在转换为 RGB...")
+      img = img.convert("RGB")
+    elif img.mode != "RGB":
+      img = img.convert("RGB")
+
+    # 存入内存字节流并转为 JPEG
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=95)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def load_prompt(prompt_arg):
+  """如果 prompt_arg 是一个存在的文件路径，则读取文件内容作为 Prompt；
+
+  否则直接将 prompt_arg 作为文本返回。
+  """
+  if os.path.isfile(prompt_arg):
+    print(f"[+] 检测到提示词文件，正在读取: {prompt_arg}")
+    with open(prompt_arg, "r", encoding="utf-8") as f:
+      return f.read().strip()
+  return prompt_arg
 
 
 def main():
   parser = argparse.ArgumentParser(
       description=(
-          "使用 OVMS 部署的 Qwen3.8-27B 多模态模型进行多图理解与描述测试"
+          "OVMS Qwen3.8-27B 视觉多模态测试脚本 (支持直接输入文字或读取提示词文件)"
       )
   )
-  parser.add_argument(
-      "images",
-      nargs="+",
-      help="要上传的一张或多张图片路径 (例如: image1.jpg image2.png)",
-  )
+  parser.add_argument("images", nargs="+", help="图片路径（可传多张）")
   parser.add_argument(
       "-p",
       "--prompt",
-      default="请详细描述这几张图片的内容，并分析它们之间的异同或关联。",
-      help="给模型的提示词",
+      default=(
+          "描述一下图片中是否有车辆，如果有，查看车辆是否有损坏，描述损坏细节。"
+      ),
+      help="提示词文本，或者包含提示词内容的文本文件路径",
   )
   parser.add_argument(
       "--base-url",
       default="http://10.239.216.35:8000/v3",
       help="OVMS OpenAI 兼容接口地址",
   )
-  parser.add_argument(
-      "--model", default="qwen3.8-27b", help="OVMS 模型 ID"
-  )
+  parser.add_argument("--model", default="qwen3.8-27b", help="模型名称")
 
   args = parser.parse_args()
 
-  # 初始化 OpenAI 客户端连接 OVMS (API Key 任意填写)
+  # 智能加载 Prompt（支持纯文本或文件）
+  prompt_text = load_prompt(args.prompt)
+
   client = OpenAI(api_key="ovms", base_url=args.base_url)
 
-  # 构造多模态消息的 content 列表
-  content_list = [{"type": "text", "text": args.prompt}]
+  content_list = [{"type": "text", "text": prompt_text}]
 
-  print(f"[+] 正在加载 {len(args.images)} 张图片...")
+  print(f"[+] 正在安全处理 {len(args.images)} 张图片...")
   for idx, img_path in enumerate(args.images):
-    # 根据文件后缀自动匹配 MIME 类型
-    ext = os.path.splitext(img_path)[1].lower()
-    if ext == ".png":
-      mime_type = "image/png"
-    elif ext in [".webp"]:
-      mime_type = "image/webp"
-    else:
-      mime_type = "image/jpeg"
-
-    b64_data = encode_image(img_path)
+    b64_data = encode_image_safely(img_path)
     content_list.append({
         "type": "image_url",
-        "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
+        "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},
     })
-    print(f"    [{idx + 1}] 已编码: {img_path}")
+    print(f"    [{idx + 1}] 已转换为 RGB JPEG 并编码发送")
 
   print(f"[+] 正在向 OVMS 发送请求 (模型: {args.model})...")
 
@@ -71,7 +91,7 @@ def main():
         model=args.model,
         messages=[{"role": "user", "content": content_list}],
         max_tokens=1024,
-        temperature=0.7,
+        temperature=0.1,
     )
 
     print("\n================ 模型回复 ================")
@@ -80,10 +100,6 @@ def main():
 
   except Exception as e:
     print(f"\n[!] 请求失败: {e}")
-    print(
-        "提示: 请检查代理设置，确保当前终端已配置 no_proxy 包含 10.239.216.35"
-    )
-    print("      可执行: export no_proxy=$no_proxy,10.239.216.35")
 
 
 if __name__ == "__main__":
