@@ -3,7 +3,8 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 # ==================== 用户配置区 ====================
-MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K.gguf"
+# MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K.gguf"
+MODEL_PATH="${SCRIPT_DIR}/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf"
 SERVED_MODEL_NAME="qwen3.8-27b"
 
 # 思考模式开关 (true: 开启思考, false: 关闭思考)
@@ -28,11 +29,74 @@ else
 fi
 
 # --- 设置显卡与 Vulkan 禁用 ---
-export CUDA_VISIBLE_DEVICES=1
-export OLLAMA_VULKAN=false
+export CUDA_VISIBLE_DEVICES=0
+# export OLLAMA_VULKAN=false
 
 # 服务地址配置
-ServerIP="10.112.106.102"
+# ==================== 本机 IP 自动探测 ====================
+# 手动覆盖（可选）：执行前 export OLLAMA_BIND_IP="192.168.1.25"
+# 指定优先网卡（可选）：执行前 export OLLAMA_PREFER_IFACE="eth0"
+get_host_ip() {
+    local ip iface
+
+    # 1) 用户显式指定，最高优先级
+    if [ -n "${OLLAMA_BIND_IP:-}" ]; then
+        printf '%s\n' "$OLLAMA_BIND_IP"
+        return 0
+    fi
+
+    # 2) 用户指定了优先网卡
+    if [ -n "${OLLAMA_PREFER_IFACE:-}" ] && command -v ip >/dev/null 2>&1; then
+        ip=$(ip -4 -o addr show dev "$OLLAMA_PREFER_IFACE" scope global 2>/dev/null \
+             | awk '{a=$4; sub(/\/.*/,"",a); print a; exit}')
+        if [ -n "$ip" ]; then
+            printf '%s\n' "$ip"
+            return 0
+        fi
+    fi
+
+    # 3) 默认出口路由的源地址（只查路由表，不会真的发包）
+    if command -v ip >/dev/null 2>&1; then
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null \
+             | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+        case "$ip" in
+            ""|127.*|0.0.0.0|169.254.*) ;;
+            *) printf '%s\n' "$ip"; return 0 ;;
+        esac
+    fi
+
+    # 4) 遍历全局地址，跳过 docker/veth/br-/virbr 等虚拟网卡
+    if command -v ip >/dev/null 2>&1; then
+        while read -r iface ip; do
+            case "$iface" in
+                docker*|veth*|br-*|virbr*|cni*|flannel*|tun*|tap*|kube*) continue ;;
+            esac
+            case "$ip" in
+                ""|127.*|169.254.*) continue ;;
+            esac
+            printf '%s\n' "$ip"
+            return 0
+        done < <(ip -4 -o addr show scope global 2>/dev/null | awk '
+            { a=$4; sub(/\/.*/,"",a); print $2, a }')
+    fi
+
+    # 5) hostname -I 兜底
+    if command -v hostname >/dev/null 2>&1; then
+        for ip in $(hostname -I 2>/dev/null); do
+            case "$ip" in
+                ""|127.*|169.254.*) continue ;;
+            esac
+            printf '%s\n' "$ip"
+            return 0
+        done
+    fi
+
+    # 6) 最终兜底
+    printf '127.0.0.1\n'
+}
+# ========================================================
+
+ServerIP="$(get_host_ip)"
 PORT="8000"
 export OLLAMA_HOST="${ServerIP}:${PORT}"
 export OLLAMA_KEEP_ALIVE="-1"
@@ -79,6 +143,7 @@ check_and_import_model() {
     cat << EOF > "$MODELFILE_PATH"
 FROM ${MODEL_PATH}
 PARAMETER num_ctx 131072
+# PARAMETER num_ctx 65536
 EOF
 
     ollama create "$SERVED_MODEL_NAME" -f "$MODELFILE_PATH"
