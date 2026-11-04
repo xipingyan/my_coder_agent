@@ -7,3 +7,10 @@ unsloth
 Modelfile
 OpenVINO
 ovms_cache
+
+.ollama_model_fingerprint
+Modelfile
+ollama_server.log
+ollama_server.pid
+tmp/
+EOF
