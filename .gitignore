@@ -7,6 +7,7 @@ unsloth
 Modelfile
 OpenVINO
 ovms_cache
+llama.cpp
 
 .ollama_model_fingerprint
 Modelfile
