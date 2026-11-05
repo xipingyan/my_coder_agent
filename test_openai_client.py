@@ -1,5 +1,7 @@
 import argparse
 import time
+from pathlib import Path
+
 from openai import OpenAI
 
 THINK_OPEN = "<think>"
@@ -72,11 +74,28 @@ def process_content(text, final=False):
         break
 
 
+def load_prompt(prompt: str) -> str:
+    """prompt 是 .txt 文件路径时读取内容，否则按原文使用。"""
+    path = Path(prompt).expanduser()
+    if path.suffix.lower() != ".txt":
+        return prompt
+    if not path.is_file():
+        raise FileNotFoundError(f"prompt 文件不存在: {path}")
+    text = path.read_text(encoding="utf-8-sig")
+    if not text.strip():
+        raise ValueError(f"prompt 文件为空: {path}")
+    return text
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="流式测试 thinking / context 输出")
     parser.add_argument("--base-url", default="http://10.112.106.102:8000/v1")
     parser.add_argument("--model", default="qwen3.8-27b")
-    parser.add_argument("--prompt", default="请用 100 字左右解释一下什么是张量并行。")
+    parser.add_argument(
+        "--prompt",
+        default="请用 100 字左右解释一下什么是张量并行。",
+        help="提示词文本，或 .txt 文件路径（存在则读取文件内容）",
+    )
     parser.add_argument("--no-think", action="store_true",
                         help="关闭 thinking (chat_template_kwargs.enable_thinking=False)")
     parser.add_argument("--effort", choices=["none", "low", "medium", "high"],
@@ -88,6 +107,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    prompt = load_prompt(args.prompt)
 
     client = OpenAI(
         base_url=args.base_url,
@@ -110,7 +130,7 @@ if __name__ == "__main__":
 
     stream = client.chat.completions.create(
         model=args.model,
-        messages=[{"role": "user", "content": args.prompt}],
+        messages=[{"role": "user", "content": prompt}],
         stream=True,
         **request_kwargs,
     )
