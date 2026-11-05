@@ -67,7 +67,7 @@ static void test_config_roundtrip() {
     c.agent.parallelism = 2;
     c.paths.prompt_dirs = {"a", "b"};
     auto p = save_config(c);
-    CHECK(p == fs::path("/tmp/ca_test_home2/config.toml"));
+    CHECK(p == fs::path("/tmp/ca_test_home2/config.yaml"));
     auto c2 = AppConfig::from_json(c.to_json());
     CHECK(c2.server.model == "qwen3.8-27b:latest");
     // reload from disk
@@ -84,8 +84,8 @@ static void test_config_roundtrip() {
     // project layer overrides user layer
     fs::create_directories("/tmp/proj/.agent");
     {
-        std::ofstream f("/tmp/proj/.agent/config.toml");
-        f << "[server]\nmodel = \"proj-model\"\n";
+        std::ofstream f("/tmp/proj/.agent/config.yaml");
+        f << "server:\n  model: proj-model\n";
     }
     auto c4 = load_config("/tmp/proj");
     CHECK(c4.server.model == "proj-model");

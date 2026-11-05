@@ -1,11 +1,13 @@
 #include "approval.hpp"
-#include "config.hpp"   // toml helpers are in config.cpp; we reuse toml++ directly here
+#include "config.hpp"
 #include "paths.hpp"
+#include "util.hpp"
 #include <filesystem>
 #include <fstream>
 #include <regex>
 #include <set>
-#include <toml.hpp>
+#include <iterator>
+#include <sstream>
 
 namespace ca {
 using json = nlohmann::json;
@@ -178,53 +180,13 @@ bool path_glob_match(const std::string& path, const std::string& pattern) {
 }
 
 // ------------------------------------------------------------------- policy
-static json toml_to_json(const toml::node& n) {
-    if (n.is_string()) return n.value<std::string>().value();
-    if (n.is_boolean()) return n.value<bool>().value();
-    if (n.is_integer()) return (double)n.value<int64_t>().value();
-    if (n.is_floating_point()) return n.value<double>().value();
-    if (n.is_array()) {
-        json arr = json::array();
-        for (auto& e : *n.as_array()) arr.push_back(toml_to_json(e));
-        return arr;
-    }
-    if (n.is_table()) {
-        json obj = json::object();
-        for (auto& kv : *n.as_table()) obj[kv.first] = toml_to_json(kv.second);
-        return obj;
-    }
-    return nullptr;
-}
-
-static void json_into(toml::table& tbl, const std::string& key, const json& j) {
-    if (j.is_null()) return;
-    if (j.is_boolean()) tbl.emplace(key, j.get<bool>());
-    else if (j.is_number_integer()) tbl.emplace(key, (int64_t)j.get<int64_t>());
-    else if (j.is_number_float()) tbl.emplace(key, j.get<double>());
-    else if (j.is_string()) tbl.emplace(key, j.get<std::string>());
-    else if (j.is_array()) {
-        toml::array arr;
-        for (auto& e : j) {
-            if (e.is_null()) continue;
-            if (e.is_boolean()) arr.emplace_back(e.get<bool>());
-            else if (e.is_number_integer()) arr.emplace_back((int64_t)e.get<int64_t>());
-            else if (e.is_number_float()) arr.emplace_back(e.get<double>());
-            else if (e.is_string()) arr.emplace_back(e.get<std::string>());
-        }
-        tbl.emplace(key, std::move(arr));
-    } else if (j.is_object()) {
-        toml::table sub;
-        for (auto it = j.begin(); it != j.end(); ++it) json_into(sub, it.key(), it.value());
-        tbl.emplace(key, std::move(sub));
-    }
-}
-
-static json read_toml_file(const std::filesystem::path& p) {
+static json read_yaml_file(const std::filesystem::path& p) {
     if (!std::filesystem::is_regular_file(p)) return json::object();
     std::ifstream f(p);
     if (!f) return json::object();
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     try {
-        return toml_to_json(toml::parse(f));
+        return yaml_to_json(text);
     } catch (const std::exception&) {
         return json::object();
     }
@@ -261,37 +223,77 @@ static const char* APPROVAL_TEMPLATE = R"(# Approval policy for the coding agent
 # Commands using $(...), backticks, heredocs or output redirection always ask.
 # Rules for files are globs on the project-relative path ('*' also matches '/').
 #
-# This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
+# This file is the user-wide policy. A project can add rules in <project>/.agent/approval.yaml
 # (lists are merged, scalars are overridden).
 
-auto_approve_all = false   # true: run everything not denied without asking (use with care)
+auto_approve_all: false        # true: run everything not denied without asking (use with care)
 
-[commands]
-default = "ask"            # ask | deny
-allow = [
-    "ls", "pwd", "cd", "cat", "head", "tail", "wc", "echo", "which", "tree", "diff", "stat", "file",
-    "grep", "rg", "sort", "uniq",
-    "git status", "git diff", "git log", "git show", "git branch", "git rev-parse",
-    "cmake --version", "cmake -S", "cmake -B", "cmake --build", "ctest",
-    "make", "ninja",
-    "g++ --version", "clang++ --version",
-    "node --version", "npm run build", "npm test", "npx tsc",
-    "python --version", "python3 --version",
-]
-allow_regex = []
-deny = [
-    "sudo", "su", "mkfs", "dd", "shutdown", "reboot", "poweroff",
-    "rm -rf /", "rm -rf ~", "rm -rf *", "chmod -R 777",
-]
+commands:
+  default: ask                 # ask | deny
+  allow:
+    - ls
+    - pwd
+    - cd
+    - cat
+    - head
+    - tail
+    - wc
+    - echo
+    - which
+    - tree
+    - diff
+    - stat
+    - file
+    - grep
+    - rg
+    - sort
+    - uniq
+    - git status
+    - git diff
+    - git log
+    - git show
+    - git branch
+    - git rev-parse
+    - cmake --version
+    - cmake -S
+    - cmake -B
+    - cmake --build
+    - ctest
+    - make
+    - ninja
+    - g++ --version
+    - clang++ --version
+    - node --version
+    - npm run build
+    - npm test
+    - npx tsc
+    - python --version
+    - python3 --version
+  allow_regex: []
+  deny:
+    - sudo
+    - su
+    - mkfs
+    - dd
+    - shutdown
+    - reboot
+    - poweroff
+    - rm -rf /
+    - rm -rf ~
+    - rm -rf *
+    - chmod -R 777
 
-[files]
-default = "ask"            # ask | deny
-allow = ["build/*", "tmp/*"]
-deny = [".git/*"]
+files:
+  default: ask                 # ask | deny
+  allow:
+    - build/*
+    - tmp/*
+  deny:
+    - .git/*
 )";
 
 static std::filesystem::path ensure_user_policy() {
-    std::filesystem::path p = user_dir() / "approval.toml";
+    std::filesystem::path p = user_dir() / "approval.yaml";
     if (!std::filesystem::exists(p)) {
         std::filesystem::create_directories(p.parent_path());
         std::ofstream f(p, std::ios::binary);
@@ -303,13 +305,13 @@ static std::filesystem::path ensure_user_policy() {
 ApprovalPolicy ApprovalPolicy::load(const std::filesystem::path& root) {
     ApprovalPolicy p;
     p.user_file = ensure_user_policy();
-    if (!root.empty()) p.project_file = project_cache_dir(root) / "approval.toml";
-    p.data = merge_policy(read_toml_file(p.user_file), read_toml_file(p.project_file));
+    if (!root.empty()) p.project_file = project_cache_dir(root) / "approval.yaml";
+    p.data = merge_policy(read_yaml_file(p.user_file), read_yaml_file(p.project_file));
     return p;
 }
 
 void ApprovalPolicy::reload() {
-    data = merge_policy(read_toml_file(user_file), read_toml_file(project_file));
+    data = merge_policy(read_yaml_file(user_file), read_yaml_file(project_file));
 }
 
 static const json& section(const json& data, const std::string& name) {
@@ -395,7 +397,7 @@ std::optional<std::filesystem::path> ApprovalPolicy::remember(const std::string&
     if (scope == "project" && !project_file.empty()) file = project_file;
     else file = user_file;
     if (r.empty() || file.empty()) return std::nullopt;
-    json raw = read_toml_file(file);
+    json raw = read_yaml_file(file);
     json& sec = raw[kind == "command" ? "commands" : "files"];
     if (!sec.is_object()) sec = json::object();
     json& lst = sec["allow"];
@@ -405,9 +407,7 @@ std::optional<std::filesystem::path> ApprovalPolicy::remember(const std::string&
     if (!found) lst.push_back(r);
     std::filesystem::create_directories(file.parent_path());
     std::ofstream f(file, std::ios::binary);
-    toml::table node;
-    for (auto it = raw.begin(); it != raw.end(); ++it) json_into(node, it.key(), it.value());
-    f << node;
+    f << json_to_yaml(raw);
     reload();
     return file;
 }

@@ -1,55 +1,14 @@
 #include "config.hpp"
 #include "paths.hpp"
+#include "util.hpp"
 #include <fstream>
-#include <sstream>
-#include <toml.hpp>
+#include <iterator>
+#include <cstdio>
 
 namespace ca {
 using json = nlohmann::json;
 
 // ---------------------------------------------------------------- helpers
-static json toml_to_json(const toml::node& n) {
-    if (n.is_string()) return n.value<std::string>().value();
-    if (n.is_boolean()) return n.value<bool>().value();
-    if (n.is_integer()) return (double)n.value<int64_t>().value();
-    if (n.is_floating_point()) return n.value<double>().value();
-    if (n.is_array()) {
-        json arr = json::array();
-        for (auto& e : *n.as_array()) arr.push_back(toml_to_json(e));
-        return arr;
-    }
-    if (n.is_table()) {
-        json obj = json::object();
-        for (auto& kv : *n.as_table()) obj[kv.first] = toml_to_json(kv.second);
-        return obj;
-    }
-    return nullptr;
-}
-
-// Insert a json value into a toml table under `key` (skips null).
-static void json_into(toml::table& tbl, const std::string& key, const json& j) {
-    if (j.is_null()) return;
-    if (j.is_boolean()) tbl.emplace(key, j.get<bool>());
-    else if (j.is_number_integer()) tbl.emplace(key, (int64_t)j.get<int64_t>());
-    else if (j.is_number_float()) tbl.emplace(key, j.get<double>());
-    else if (j.is_string()) tbl.emplace(key, j.get<std::string>());
-    else if (j.is_array()) {
-        toml::array arr;
-        for (auto& e : j) {
-            if (e.is_null()) continue;
-            if (e.is_boolean()) arr.emplace_back(e.get<bool>());
-            else if (e.is_number_integer()) arr.emplace_back((int64_t)e.get<int64_t>());
-            else if (e.is_number_float()) arr.emplace_back(e.get<double>());
-            else if (e.is_string()) arr.emplace_back(e.get<std::string>());
-        }
-        tbl.emplace(key, std::move(arr));
-    } else if (j.is_object()) {
-        toml::table sub;
-        for (auto it = j.begin(); it != j.end(); ++it) json_into(sub, it.key(), it.value());
-        tbl.emplace(key, std::move(sub));
-    }
-}
-
 static json deep_merge(const json& base, const json& over) {
     if (!base.is_object() || !over.is_object()) return over;
     json out = base;
@@ -61,12 +20,12 @@ static json deep_merge(const json& base, const json& over) {
     return out;
 }
 
-static json read_toml(const std::filesystem::path& p) {
+static json read_yaml(const std::filesystem::path& p) {
     std::ifstream f(p);
     if (!f) return json::object();
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     try {
-        auto res = toml::parse(f);
-        return toml_to_json(res);
+        return yaml_to_json(text);
     } catch (const std::exception&) {
         return json::object();
     }
@@ -117,8 +76,16 @@ json AppConfig::to_json() const {
 }
 
 AppConfig AppConfig::from_json(const json& j) {
+    std::fprintf(stderr, "DBG enter from_json\n");
     AppConfig c;
-    if (auto v = j.value("server", json::object())) {
+    auto dbg = [](const char* k, const json& v) {
+        for (auto it = v.begin(); it != v.end(); ++it)
+            if (it.value().is_object()) std::fprintf(stderr, "DBG %s.%s is OBJECT: %s\n", k, it.key().c_str(), it.value().dump().c_str());
+    };
+    std::fprintf(stderr, "DBG sec server\n", "server");
+    if (auto v = j.value("server", json::object())) { dbg("server", v);
+        std::fprintf(stderr, "DBG server dump: %s\n", v.dump().c_str());
+        std::fprintf(stderr, "DBG bypass_proxy type=%s\n", v["bypass_proxy"].type_name());
         c.server.provider = v.value("provider", c.server.provider);
         c.server.base_url = v.value("base_url", c.server.base_url);
         c.server.api_key = v.value("api_key", c.server.api_key);
@@ -127,7 +94,8 @@ AppConfig AppConfig::from_json(const json& j) {
         c.server.connect_timeout = v.value("connect_timeout", c.server.connect_timeout);
         c.server.bypass_proxy = v.value("bypass_proxy", c.server.bypass_proxy);
     }
-    if (auto v = j.value("thinking", json::object())) {
+    std::fprintf(stderr, "DBG sec thinking\n", "thinking");
+    if (auto v = j.value("thinking", json::object())) { dbg("thinking", v);
         c.thinking.effort = v.value("effort", c.thinking.effort);
         c.thinking.send_effort = v.value("send_effort", c.thinking.send_effort);
         if (v.contains("enable_thinking") && !v["enable_thinking"].is_null())
@@ -137,12 +105,14 @@ AppConfig AppConfig::from_json(const json& j) {
         c.thinking.max_think_chars = v.value("max_think_chars", c.thinking.max_think_chars);
         if (v.contains("extra_body")) c.thinking.extra_body = v["extra_body"];
     }
-    if (auto v = j.value("sampling", json::object())) {
+    std::fprintf(stderr, "DBG sec sampling\n", "sampling");
+    if (auto v = j.value("sampling", json::object())) { dbg("sampling", v);
         c.sampling.temperature = null_or_val(v.value("temperature", json(nullptr)));
         c.sampling.top_p = null_or_val(v.value("top_p", json(nullptr)));
         c.sampling.max_tokens = null_or_int(v.value("max_tokens", json(nullptr)));
     }
-    if (auto v = j.value("context", json::object())) {
+    std::fprintf(stderr, "DBG sec context\n", "context");
+    if (auto v = j.value("context", json::object())) { dbg("context", v);
         c.context.max_tokens = v.value("max_tokens", c.context.max_tokens);
         c.context.compress_threshold = v.value("compress_threshold", c.context.compress_threshold);
         c.context.compress_target = v.value("compress_target", c.context.compress_target);
@@ -150,7 +120,8 @@ AppConfig AppConfig::from_json(const json& j) {
         c.context.keep_recent_units = v.value("keep_recent_units", c.context.keep_recent_units);
         c.context.tool_output_max_chars = v.value("tool_output_max_chars", c.context.tool_output_max_chars);
     }
-    if (auto v = j.value("agent", json::object())) {
+    std::fprintf(stderr, "DBG sec agent\n", "agent");
+    if (auto v = j.value("agent", json::object())) { dbg("agent", v);
         c.agent.max_steps = v.value("max_steps", c.agent.max_steps);
         c.agent.parallelism = v.value("parallelism", c.agent.parallelism);
         c.agent.loop_limit = v.value("loop_limit", c.agent.loop_limit);
@@ -158,14 +129,16 @@ AppConfig AppConfig::from_json(const json& j) {
         c.agent.failure_hint_after = v.value("failure_hint_after", c.agent.failure_hint_after);
         c.agent.gdb_hint_after = v.value("gdb_hint_after", c.agent.gdb_hint_after);
     }
-    if (auto v = j.value("orchestrator", json::object())) {
+    std::fprintf(stderr, "DBG sec orchestrator\n", "orchestrator");
+    if (auto v = j.value("orchestrator", json::object())) { dbg("orchestrator", v);
         c.orchestrator.max_subtasks = v.value("max_subtasks", c.orchestrator.max_subtasks);
         c.orchestrator.subtask_max_steps = v.value("subtask_max_steps", c.orchestrator.subtask_max_steps);
         c.orchestrator.planner_thinking = v.value("planner_thinking", c.orchestrator.planner_thinking);
         c.orchestrator.doc_analysis = v.value("doc_analysis", c.orchestrator.doc_analysis);
         c.orchestrator.confirm_each_stage = v.value("confirm_each_stage", c.orchestrator.confirm_each_stage);
     }
-    if (auto v = j.value("paths", json::object())) {
+    std::fprintf(stderr, "DBG sec paths\n", "paths");
+    if (auto v = j.value("paths", json::object())) { dbg("paths", v);
         c.paths.project_root = v.value("project_root", c.paths.project_root);
         if (v.contains("prompt_dirs"))
             for (auto& s : v["prompt_dirs"]) c.paths.prompt_dirs.push_back(s.get<std::string>());
@@ -174,13 +147,13 @@ AppConfig AppConfig::from_json(const json& j) {
 }
 
 // ---------------------------------------------------------------- loading
-std::filesystem::path user_config_path() { return user_dir() / "config.toml"; }
+std::filesystem::path user_config_path() { return user_dir() / "config.yaml"; }
 std::filesystem::path project_config_path(const std::filesystem::path& root) {
-    return project_cache_dir(root) / "config.toml";
+    return project_cache_dir(root) / "config.yaml";
 }
 
 AppConfig load_config(const std::filesystem::path& project_root) {
-    json data = read_toml(user_config_path());
+    json data = read_yaml(user_config_path());
     std::filesystem::path root = project_root;
     if (root.empty()) {
         if (auto v = data.value("paths", json::object()).value("project_root", json(nullptr)))
@@ -188,7 +161,7 @@ AppConfig load_config(const std::filesystem::path& project_root) {
                 root = v.get<std::string>();
     }
     if (!root.empty()) {
-        data = deep_merge(data, read_toml(project_config_path(root)));
+        data = deep_merge(data, read_yaml(project_config_path(root)));
         data["paths"]["project_root"] = root.string();
     }
     return AppConfig::from_json(data);
@@ -197,15 +170,8 @@ AppConfig load_config(const std::filesystem::path& project_root) {
 std::filesystem::path save_config(const AppConfig& cfg, const std::filesystem::path& path) {
     std::filesystem::path p = path.empty() ? user_config_path() : path;
     std::filesystem::create_directories(p.parent_path());
-    toml::table root;
-    json data = cfg.to_json();
-    for (auto it = data.begin(); it != data.end(); ++it)
-        json_into(root, it.key(), it.value());
-    std::ostringstream oss;
-    oss << root;
-    std::string text = oss.str();
     std::ofstream f(p, std::ios::binary);
-    f << text;
+    f << json_to_yaml(cfg.to_json());
     return p;
 }
 

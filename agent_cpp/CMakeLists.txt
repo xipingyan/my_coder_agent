@@ -8,12 +8,19 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 add_compile_options(-g -O0 -Wall -Wextra)
 
-# ---- core library ---------------------------------------------------------
+# ---- yaml-cpp (vendored, third_party/yaml-cpp) ------------------------------
+file(GLOB YAMLCPP_SRC third_party/yaml-cpp/src/*.cpp)
+add_library(yaml-cpp STATIC ${YAMLCPP_SRC})
+target_include_directories(yaml-cpp PUBLIC third_party/yaml-cpp/include)
+target_compile_options(yaml-cpp PRIVATE -w)  # silence warnings in vendored code
+
+# ---- core library -----------------------------------------------------------
 file(GLOB CORE_SRC core/*.cpp)
 add_library(core STATIC ${CORE_SRC})
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/third_party)
+target_link_libraries(core PUBLIC yaml-cpp)
 
-# ---- unit tests -----------------------------------------------------------
+# ---- unit tests -------------------------------------------------------------
 find_package(Threads REQUIRED)
 enable_testing()
 file(GLOB TEST_SRC tests/*.cpp)

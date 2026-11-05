@@ -1,6 +1,6 @@
 #pragma once
-// Application configuration: built-in defaults < ~/.coder_agent/config.toml
-// < <project>/.agent/config.toml  (later wins, deep-merged).
+// Application configuration: built-in defaults < ~/.coder_agent/config.yaml
+// < <project>/.agent/config.yaml  (later wins, deep-merged).
 
 #include <filesystem>
 #include <optional>

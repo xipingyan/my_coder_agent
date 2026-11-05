@@ -1,6 +1,7 @@
 #include "util.hpp"
 #include <cstdio>
 #include <sstream>
+#include "yaml-cpp/yaml.h"
 
 namespace ca {
 
@@ -93,6 +94,60 @@ std::string collapse_ws(const std::string& s) {
     }
     while (!out.empty() && out.back() == ' ') out.pop_back();
     return out;
+}
+
+static nlohmann::json yaml_node_to_json(const YAML::Node& n) {
+    using json = nlohmann::json;
+    if (!n) return json::object();
+    if (n.IsScalar()) {
+        std::string v = n.Scalar();
+        if (v == "true") return true;
+        if (v == "false") return false;
+        if (v.empty() || v == "null" || v == "~") return nullptr;
+        try { size_t pos; long long i = std::stoll(v, &pos); if (pos == v.size()) return (double)i; } catch (...) {}
+        try { size_t pos; double d = std::stod(v, &pos); if (pos == v.size()) return d; } catch (...) {}
+        return v;
+    }
+    if (n.IsSequence()) {
+        json arr = json::array();
+        for (auto& e : n) arr.push_back(yaml_node_to_json(e));
+        return arr;
+    }
+    json obj = json::object();
+    for (auto& kv : n) obj[kv.first.Scalar()] = yaml_node_to_json(kv.second);
+    return obj;
+}
+
+static YAML::Node json_to_node(const nlohmann::json& j) {
+    YAML::Node n;
+    if (j.is_null()) return n;
+    if (j.is_boolean()) { n = j.get<bool>(); return n; }
+    if (j.is_number_integer()) { n = j.get<int64_t>(); return n; }
+    if (j.is_number_float()) { n = j.get<double>(); return n; }
+    if (j.is_string()) { n = j.get<std::string>(); return n; }
+    if (j.is_array()) {
+        n = YAML::Node(YAML::NodeType::Sequence);
+        for (auto& e : j)
+            if (!e.is_null()) n.push_back(json_to_node(e));
+        return n;
+    }
+    if (j.is_object()) {
+        n = YAML::Node(YAML::NodeType::Map);
+        for (auto it = j.begin(); it != j.end(); ++it)
+            if (!it.value().is_null()) n[it.key()] = json_to_node(it.value());
+    }
+    return n;
+}
+
+nlohmann::json yaml_to_json(const std::string& text) {
+    YAML::Node n = YAML::Load(text);
+    return yaml_node_to_json(n);
+}
+
+std::string json_to_yaml(const nlohmann::json& j) {
+    YAML::Emitter oss;
+    oss << json_to_node(j);
+    return oss.c_str();
 }
 
 std::string shorten(const std::string& text, size_t n) {

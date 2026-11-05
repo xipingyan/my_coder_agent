@@ -44,7 +44,7 @@ public:
     ApprovalPolicy() = default;
 
     // user file is created from the built-in template if missing;
-    // project file is <root>/.agent/approval.toml when root given.
+    // project file is <root>/.agent/approval.yaml when root given.
     static ApprovalPolicy load(const std::filesystem::path& root = std::filesystem::path());
     void reload();
 
