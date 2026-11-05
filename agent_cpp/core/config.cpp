@@ -26,24 +26,28 @@ static json toml_to_json(const toml::node& n) {
     return nullptr;
 }
 
-static toml::table json_to_toml(const json& j) {
-    if (j.is_null()) return toml::table{};
-    if (j.is_boolean()) return toml::table{{"", toml::node(j.get<bool>())}};
-    if (j.is_number_integer()) return toml::table{{"", toml::node((int64_t)j.get<int64_t>())}};
-    if (j.is_number_float()) return toml::table{{"", toml::node(j.get<double>())}};
-    if (j.is_string()) return toml::table{{"", toml::node(j.get<std::string>())}};
-    if (j.is_array()) {
-        std::vector<toml::node> v;
-        for (auto& e : j) v.push_back(json_to_toml(e));
-        return toml::table{{"", toml::node(std::move(v))}};
+// Insert a json value into a toml table under `key` (skips null).
+static void json_into(toml::table& tbl, const std::string& key, const json& j) {
+    if (j.is_null()) return;
+    if (j.is_boolean()) tbl.emplace(key, j.get<bool>());
+    else if (j.is_number_integer()) tbl.emplace(key, (int64_t)j.get<int64_t>());
+    else if (j.is_number_float()) tbl.emplace(key, j.get<double>());
+    else if (j.is_string()) tbl.emplace(key, j.get<std::string>());
+    else if (j.is_array()) {
+        toml::array arr;
+        for (auto& e : j) {
+            if (e.is_null()) continue;
+            if (e.is_boolean()) arr.emplace_back(e.get<bool>());
+            else if (e.is_number_integer()) arr.emplace_back((int64_t)e.get<int64_t>());
+            else if (e.is_number_float()) arr.emplace_back(e.get<double>());
+            else if (e.is_string()) arr.emplace_back(e.get<std::string>());
+        }
+        tbl.emplace(key, std::move(arr));
+    } else if (j.is_object()) {
+        toml::table sub;
+        for (auto it = j.begin(); it != j.end(); ++it) json_into(sub, it.key(), it.value());
+        tbl.emplace(key, std::move(sub));
     }
-    if (j.is_object()) {
-        std::map<std::string, toml::node> m;
-        for (auto it = j.begin(); it != j.end(); ++it)
-            if (!it.value().is_null()) m[it.key()] = json_to_toml(it.value());
-        return toml::table(std::move(m));
-    }
-    return toml::table{};
 }
 
 static json deep_merge(const json& base, const json& over) {
@@ -193,9 +197,12 @@ AppConfig load_config(const std::filesystem::path& project_root) {
 std::filesystem::path save_config(const AppConfig& cfg, const std::filesystem::path& path) {
     std::filesystem::path p = path.empty() ? user_config_path() : path;
     std::filesystem::create_directories(p.parent_path());
-    auto root = json_to_toml(cfg.to_json());
+    toml::table root;
+    json data = cfg.to_json();
+    for (auto it = data.begin(); it != data.end(); ++it)
+        json_into(root, it.key(), it.value());
     std::ostringstream oss;
-    oss << toml::toml_formatter{root};
+    oss << root;
     std::string text = oss.str();
     std::ofstream f(p, std::ios::binary);
     f << text;

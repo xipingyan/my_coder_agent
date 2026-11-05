@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 using namespace ca;
 namespace fs = std::filesystem;
@@ -67,7 +68,7 @@ static void test_config_roundtrip() {
     c.paths.prompt_dirs = {"a", "b"};
     auto p = save_config(c);
     CHECK(p == fs::path("/tmp/ca_test_home2/config.toml"));
-    auto c2 = AppConfig::from_json(AppConfig{}.to_json() == c.to_json() ? c.to_json() : json::object());
+    auto c2 = AppConfig::from_json(c.to_json());
     CHECK(c2.server.model == "qwen3.8-27b:latest");
     // reload from disk
     auto c3 = load_config();

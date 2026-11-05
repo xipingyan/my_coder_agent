@@ -1,6 +1,7 @@
 #include "approval.hpp"
 #include "config.hpp"   // toml helpers are in config.cpp; we reuse toml++ directly here
 #include "paths.hpp"
+#include <filesystem>
 #include <fstream>
 #include <regex>
 #include <set>
@@ -195,28 +196,31 @@ static json toml_to_json(const toml::node& n) {
     return nullptr;
 }
 
-static toml::table json_to_toml(const json& j) {
-    if (j.is_null()) return toml::table{};
-    if (j.is_boolean()) return toml::table{{"", toml::node(j.get<bool>())}};
-    if (j.is_number_integer()) return toml::table{{"", toml::node((int64_t)j.get<int64_t>())}};
-    if (j.is_number_float()) return toml::table{{"", toml::node(j.get<double>())}};
-    if (j.is_string()) return toml::table{{"", toml::node(j.get<std::string>())}};
-    if (j.is_array()) {
-        std::vector<toml::node> v;
-        for (auto& e : j) v.push_back(json_to_toml(e));
-        return toml::table{{"", toml::node(std::move(v))}};
+static void json_into(toml::table& tbl, const std::string& key, const json& j) {
+    if (j.is_null()) return;
+    if (j.is_boolean()) tbl.emplace(key, j.get<bool>());
+    else if (j.is_number_integer()) tbl.emplace(key, (int64_t)j.get<int64_t>());
+    else if (j.is_number_float()) tbl.emplace(key, j.get<double>());
+    else if (j.is_string()) tbl.emplace(key, j.get<std::string>());
+    else if (j.is_array()) {
+        toml::array arr;
+        for (auto& e : j) {
+            if (e.is_null()) continue;
+            if (e.is_boolean()) arr.emplace_back(e.get<bool>());
+            else if (e.is_number_integer()) arr.emplace_back((int64_t)e.get<int64_t>());
+            else if (e.is_number_float()) arr.emplace_back(e.get<double>());
+            else if (e.is_string()) arr.emplace_back(e.get<std::string>());
+        }
+        tbl.emplace(key, std::move(arr));
+    } else if (j.is_object()) {
+        toml::table sub;
+        for (auto it = j.begin(); it != j.end(); ++it) json_into(sub, it.key(), it.value());
+        tbl.emplace(key, std::move(sub));
     }
-    if (j.is_object()) {
-        std::map<std::string, toml::node> m;
-        for (auto it = j.begin(); it != j.end(); ++it)
-            if (!it.value().is_null()) m[it.key()] = json_to_toml(it.value());
-        return toml::table(std::move(m));
-    }
-    return toml::table{};
 }
 
 static json read_toml_file(const std::filesystem::path& p) {
-    if (!std::filesystem::is_file(p)) return json::object();
+    if (!std::filesystem::is_regular_file(p)) return json::object();
     std::ifstream f(p);
     if (!f) return json::object();
     try {
@@ -309,7 +313,7 @@ void ApprovalPolicy::reload() {
 }
 
 static const json& section(const json& data, const std::string& name) {
-    static json empty;
+    static const json empty = json::object();
     if (data.contains(name) && data[name].is_object()) return data[name];
     return empty;
 }
@@ -401,8 +405,9 @@ std::optional<std::filesystem::path> ApprovalPolicy::remember(const std::string&
     if (!found) lst.push_back(r);
     std::filesystem::create_directories(file.parent_path());
     std::ofstream f(file, std::ios::binary);
-    auto node = json_to_toml(raw);
-    f << toml::toml_formatter{node};
+    toml::table node;
+    for (auto it = raw.begin(); it != raw.end(); ++it) json_into(node, it.key(), it.value());
+    f << node;
     reload();
     return file;
 }
