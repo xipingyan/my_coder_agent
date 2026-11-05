@@ -41,7 +41,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 nvidia-smi --query-gpu=index,name,compute_cap --format=csv
 ```
 
-#### OLLAMA for unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf
+#### OLLAMA for unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf (推荐)
 
 ```
 manage_ollma.sh start
