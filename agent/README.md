@@ -81,6 +81,36 @@ python -m coder_agent.gui.app        # 不安装命令时的等价写法
     打开工程、保存设置、每轮结束时自动刷新，点击可手动刷新。如果配置的 `context.max_tokens` 与服务端不一致会变色（橙色：配置更小，红色：配置更大，压缩会触发得太晚），
     `Settings > Context & agent > Detect...` 可一键把配置改成服务端的值。命令行 `coder-agent-cli --check` 也会打印这两个数。
 
+#### 中文输入（Linux/Ubuntu）
+
+GUI 基于 PySide6（Qt 6.12）。如果系统输入法是 **fcitx4**（如搜狗拼音），其 Qt6 桥接插件与 Qt 6.12 不兼容（`undefined symbol: ...Qt_6_PRIVATE_API`），中文无法输入；Qt6 也不支持 XIM。
+PySide6 自带的 **ibus** 插件可以正常加载，所以本项目的 GUI 通过 ibus 走中文输入：
+
+1. 安装 ibus 和拼音引擎（一次性）：
+
+   ```bash
+   sudo apt install ibus ibus-libpinyin
+   im-config -n ibus        # 或在 设置 > 区域与语言 > 输入法 里把 ibus 设为默认
+   ```
+
+2. 把 libpinyin 加进 ibus 的输入法列表（**最容易漏的一步**——`ibus list-engine` 能看到
+   libpinyin 已安装，但 ibus 默认只启用英文键盘，托盘里选不出中文）：
+
+   ```bash
+   dconf write /desktop/ibus/general/engines "['xkb:us::eng', 'libpinyin']"
+   dconf write /desktop/ibus/general/primary-engine-order "['libpinyin', 'xkb:us::eng']"
+   ```
+
+   或在 ibus 设置界面（ibus-setup）里手动添加 "libpinyin (智能拼音)"。
+   `./start_gui.sh` 启动时会自动检查并补齐这两个配置。
+3. 注销重新登录（或 `pkill ibus-daemon` 让它重启），确认 ibus 托盘图标出现，
+   且 ibus 里启用了 "libpinyin (智能拼音)"。
+4. 用 `./start_gui.sh` 启动 GUI（脚本已导出 `QT_IM_MODULE=ibus`）。
+   如果直接运行 `python -m coder_agent.gui.app`，需先 `export QT_IM_MODULE=ibus`。
+
+> 注意：ibus 和 fcitx 会抢键盘焦点，建议 `im-config` 切到 ibus 后不要再启动 fcitx（搜狗拼音需要 ibus 版或改用 libpinyin）。
+> 如果 fcitx 仍在运行（如 `~/.config/autostart/fcitx.desktop` 残留），删除该文件并注销重登。
+
 ### 计划模式（拆子任务）
 
 工具栏 Mode 选 **Plan & subtasks**，输入目标后：
