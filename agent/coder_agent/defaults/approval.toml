@@ -1,15 +1,23 @@
 # Approval policy for the coding agent.
 #
-# Decision order:  deny  >  allow  >  default (ask the user).
+# Decision order:  deny  >  allow  >  trusted paths  >  default (ask the user).
 # Rules for commands are token prefixes: "cmake --build" matches "cmake --build build -j8".
 # Compound commands (&&, ||, ;, |) are split; EVERY part must be allowed.
-# Commands using $(...), backticks, heredocs or output redirection always ask.
+# Commands using $(...), backticks or heredocs always ask.
 # Rules for files are globs on the project-relative path ('*' also matches '/').
 #
+# Trusted paths: file writes and commands whose paths (arguments, redirect targets, working
+# directory after `cd`) all lie inside the project root or one of [paths].trusted run WITHOUT asking,
+# except commands listed in [commands].confirm (network, installs, killing processes, git push ...).
+#
 # This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
-# (lists are merged, scalars are overridden).
+# (lists are merged, scalars are overridden). The agent can never edit these two files without asking.
 
 auto_approve_all = false   # true: run everything not denied without asking (use with care)
+
+[paths]
+auto_approve = true        # false: ask again for everything that is not explicitly allowed below
+trusted = ["/tmp"]         # directories besides the project root; add your own, e.g. "~/scratch"
 
 [commands]
 default = "ask"            # ask | deny
@@ -28,6 +36,8 @@ deny = [
     "sudo", "su", "mkfs", "dd", "shutdown", "reboot", "poweroff",
     "rm -rf /", "rm -rf ~", "rm -rf *", "chmod -R 777",
 ]
+# Never auto-run because of trusted paths (an explicit `allow` rule above still wins). Omit to use the built-in list.
+# confirm = ["curl", "wget", "pip", "git push", ...]
 
 [files]
 default = "ask"            # ask | deny

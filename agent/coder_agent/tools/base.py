@@ -29,6 +29,7 @@ class ToolContext:
     agent_id: str = "main"
     max_output_chars: int = 12000
     read_roots: list[Path] = field(default_factory=agent_read_roots)  # extra READ-only locations
+    extra_roots: list[Path] = field(default_factory=list)  # trusted dirs outside the root (read + write), from the approval policy
 
     def __post_init__(self) -> None:
         self.root = Path(self.root).resolve()
@@ -45,14 +46,15 @@ class ToolContext:
         return self.resolve(p)
 
     def resolve(self, p: str) -> Path:
-        """Resolve ``p`` (relative to root or absolute) and refuse to leave the root."""
+        """Resolve ``p`` (relative to root or absolute) and refuse to leave the root / trusted dirs."""
         path = Path(p).expanduser()
         if not path.is_absolute():
             path = self.root / path
         path = path.resolve()
-        if path != self.root and self.root not in path.parents:
-            raise ToolError(f"path '{p}' is outside the project root {self.root}")
-        return path
+        for r in (self.root, *self.extra_roots):
+            if path == r or r in path.parents:
+                return path
+        raise ToolError(f"path '{p}' is outside the project root {self.root} and the trusted paths")
 
     def rel(self, path: Path) -> str:
         try:

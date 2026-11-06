@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 import shlex
 import tomllib
@@ -43,8 +44,32 @@ class ApprovalResponse:
 _SAFE_REDIRECT = re.compile(r"^(?:&>\s*/dev/null|\d*>{1,2}\s*/dev/null|\d*>{1,2}&\d+)")
 
 
-def split_command(cmd: str) -> tuple[list[str], str]:
-    """Split a shell line into simple commands. Returns ``(segments, unsafe_reason)``."""
+def _read_word(cmd: str, j: int) -> tuple[str, int]:
+    """Read one (possibly quoted) shell word starting at ``j``; returns ``(word, next_index)``."""
+    out: list[str] = []
+    quote = ""
+    while j < len(cmd):
+        c = cmd[j]
+        if quote:
+            if c == quote:
+                quote = ""
+            else:
+                out.append(c)
+        elif c in "'\"":
+            quote = c
+        elif c.isspace() or c in ";|&<>()":
+            break
+        else:
+            out.append(c)
+        j += 1
+    return "".join(out), j
+
+
+def split_command(cmd: str, redirects: Optional[list[str]] = None) -> tuple[list[str], str]:
+    """Split a shell line into simple commands. Returns ``(segments, unsafe_reason)``.
+
+    With ``redirects`` (a list), output redirections to a literal file name are not 'unsafe':
+    their targets are appended to the list so the caller can check where they point."""
     segs: list[str] = []
     cur: list[str] = []
     unsafe = ""
@@ -84,6 +109,23 @@ def split_command(cmd: str) -> tuple[list[str], str]:
                 if cur and cur[-1].isdigit() and (len(cur) == 1 or cur[-2] == " "):
                     cur.pop()  # the fd number of "2>&1"
                 i += m.end()
+                continue
+            if redirects is not None and (c == ">" or c == "&"):
+                j = i + (2 if c == "&" else 1)
+                if j < n and cmd[j] == ">":
+                    j += 1  # >> (or &>>)
+                if j < n and cmd[j] == "|":
+                    j += 1  # >|
+                while j < n and cmd[j] in " \t":
+                    j += 1
+                target, j = _read_word(cmd, j)
+                if not target or re.search(r"[$`&]", target):
+                    unsafe = unsafe or "output redirection"
+                else:
+                    redirects.append(target)
+                if cur and cur[-1].isdigit() and (len(cur) == 1 or cur[-2] == " "):
+                    cur.pop()  # the fd number of "2>file"
+                i = j
                 continue
             # "2>file": the leading digit already sits in cur; either way it is a redirect
             if c == ">" or c == "&":
@@ -153,21 +195,172 @@ def ensure_user_policy() -> Path:
     return p
 
 
+# Used when the policy files do not define them (e.g. an approval.toml written by an older version).
+DEFAULT_TRUSTED = ["/tmp"]
+# Commands that never run automatically just because their paths are trusted (network, installs,
+# processes, history rewriting). An explicit [commands].allow rule still wins.
+DEFAULT_CONFIRM = [
+    "curl", "wget", "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp",
+    "pip", "pip3", "python -m pip", "python3 -m pip", "npm install", "npm i", "npm publish", "yarn", "pnpm",
+    "apt", "apt-get", "dpkg", "dnf", "yum", "pacman", "brew", "snap", "docker", "podman",
+    "kill", "pkill", "killall", "systemctl", "service", "mount", "umount", "chown", "chroot", "crontab",
+    "eval", "exec", "source",
+    "git push", "git reset", "git clean", "git checkout", "git restore", "git rebase", "git stash drop",
+    "git branch -D", "git remote", "git clone", "git fetch", "git pull",
+]
+_DESTRUCTIVE = {"rm", "rmdir", "mv", "unlink", "shred", "truncate"}
+_SAFE_DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr"}
+_DYNAMIC = re.compile(r"\$[\w{(]")
+_URL = re.compile(r"\w+://|\w+@[\w.-]+:")
+_ABS_IN_TOKEN = re.compile(r"(?:^|[\s'\"=:(,])(~?/[^\s'\"`;|&<>(),:]*)")
+
+
+class _Unresolvable(Exception):
+    """A path argument whose real location cannot be known statically (variable, URL)."""
+
+
+def _path_candidates(tok: str) -> list[str]:
+    """Parts of one command-line token that name a file or directory."""
+    if tok.startswith("-"):
+        if "=" not in tok:
+            return []
+        tok = tok.split("=", 1)[1]  # --out=/some/path
+    if not tok:
+        return []
+    if _DYNAMIC.search(tok):
+        raise _Unresolvable(f"'{tok}' uses a variable")
+    if _URL.search(tok):
+        raise _Unresolvable(f"'{tok}' is a network address")
+    out: list[str] = []
+    if not any(ch.isspace() for ch in tok) and (tok.startswith(("/", "~", ".")) or "/" in tok):
+        out.append(tok)
+    out += _ABS_IN_TOKEN.findall(tok)  # absolute paths hidden inside e.g. `python -c "open('/etc/x')"`
+    return out
+
+
+def _resolve_path(cand: str, base: Path) -> Path:
+    p = Path(cand).expanduser()
+    if not p.is_absolute():
+        p = base / p
+    return p.resolve()
+
+
+def _git_subcommand(toks: list[str]) -> list[str]:
+    """``git -C dir push`` -> ``git push`` so confirm rules see the real subcommand."""
+    i = 1
+    while i < len(toks) and toks[i].startswith("-"):
+        i += 2 if toks[i] in ("-C", "-c", "--git-dir", "--work-tree") else 1
+    return [toks[0], *toks[i:]]
+
+
 class ApprovalPolicy:
-    def __init__(self, data: Optional[dict] = None, user_file: Optional[Path] = None, project_file: Optional[Path] = None):
+    """``root`` enables path-based auto approval: file writes and commands whose paths all lie inside the
+    project root or a trusted directory (``[paths].trusted``, default ``/tmp``) run without asking."""
+
+    def __init__(
+        self,
+        data: Optional[dict] = None,
+        user_file: Optional[Path] = None,
+        project_file: Optional[Path] = None,
+        root: Optional[Path] = None,
+    ):
         self.data = data or {}
         self.user_file = user_file
         self.project_file = project_file
+        self.root = Path(root).resolve() if root else None
+        # Resolved trusted dirs outside the root. Mutated in place: ToolContext shares this list so the
+        # file tools may touch these paths (after the policy said yes).
+        self.extra_roots: list[Path] = []
+        self._refresh_roots()
 
     @classmethod
     def load(cls, root: Optional[Path] = None) -> "ApprovalPolicy":
         user_file = ensure_user_policy()
         project_file = project_cache_dir(root) / "approval.toml" if root else None
         data = _merge(_read(user_file), _read(project_file))
-        return cls(data, user_file, project_file)
+        return cls(data, user_file, project_file, root)
 
     def reload(self) -> None:
         self.data = _merge(_read(self.user_file), _read(self.project_file))
+        self._refresh_roots()
+
+    # -------------------------------------------------------------- paths
+    def _paths_cfg(self) -> dict:
+        return self.data.get("paths", {})
+
+    def _refresh_roots(self) -> None:
+        out: list[Path] = []
+        for p in self._paths_cfg().get("trusted", DEFAULT_TRUSTED):
+            try:
+                r = Path(p).expanduser().resolve()
+            except (RuntimeError, OSError):
+                continue
+            if r.parent != r and r != self.root and r not in out:  # never trust the whole filesystem
+                out.append(r)
+        self.extra_roots[:] = out
+
+    def _scoped(self) -> bool:
+        """Is path-based auto approval active?"""
+        return self.root is not None and bool(self._paths_cfg().get("auto_approve", True))
+
+    def trusted_roots(self) -> list[Path]:
+        return ([self.root] if self.root else []) + self.extra_roots
+
+    def _within(self, p: Path) -> bool:
+        return any(p == r or r in p.parents for r in self.trusted_roots())
+
+    def _protected(self, p: Path) -> bool:
+        """The policy files themselves: editing them would let the agent grant itself rights."""
+        return any(f and p == Path(f).resolve() for f in (self.user_file, self.project_file))
+
+    def _path_reason(self, cand: str, cwd: Optional[Path], destructive: bool = False) -> str:
+        """Why ``cand`` may not be touched automatically (empty string: it may)."""
+        if cwd is None:
+            return "working directory is unknown"
+        if cand in _SAFE_DEVICES:
+            return ""
+        try:
+            p = _resolve_path(cand, cwd)
+        except (RuntimeError, OSError):
+            return f"cannot resolve '{cand}'"
+        if not self._within(p):
+            return f"'{cand}' is outside the trusted paths"
+        if self._protected(p):
+            return "touches the approval policy file"
+        if destructive and p in self.trusted_roots():
+            return f"would remove the trusted directory '{cand}'"
+        return ""
+
+    def _scoped_reason(self, toks: list[str], cwd: Optional[Path]) -> str:
+        """Why a simple command may not run automatically although it is not allow-listed."""
+        if cwd is None or not self._within(cwd):
+            return "working directory is outside the trusted paths"
+        check = _git_subcommand(toks) if toks[0] == "git" else toks
+        for rule in self._cmd().get("confirm", DEFAULT_CONFIRM):
+            if _prefix_match(check, rule):
+                return f"'{rule}' always needs confirmation"
+        destructive = os.path.basename(toks[0]) in _DESTRUCTIVE
+        for tok in toks:
+            if destructive and tok in ("*", ".*", "./*"):
+                return "bulk delete/move with a bare wildcard"
+            try:
+                cands = _path_candidates(tok)
+            except _Unresolvable as e:
+                return str(e)
+            for c in cands:
+                why = self._path_reason(c, cwd, destructive)
+                if why:
+                    return why
+        return ""
+
+    def _cd_target(self, toks: list[str], cwd: Optional[Path]) -> Optional[Path]:
+        args = [t for t in toks[1:] if not t.startswith("-")]
+        if cwd is None or (args and (args[0] == "-" or _DYNAMIC.search(args[0]))):
+            return None
+        try:
+            return _resolve_path(args[0] if args else "~", cwd)
+        except (RuntimeError, OSError):
+            return None
 
     # ------------------------------------------------------------- checks
     def _cmd(self) -> dict:
@@ -177,9 +370,11 @@ class ApprovalPolicy:
         d = self.data.get(section, {}).get("default", "ask")
         return Decision("deny" if d == "deny" else "ask", f"no {section} rule matched")
 
-    def check_command(self, command: str) -> Decision:
+    def check_command(self, command: str, cwd: Optional[Path] = None) -> Decision:
         cfg = self._cmd()
-        segs, unsafe = split_command(command)
+        scoped = self._scoped()
+        redirects: list[str] = []
+        segs, unsafe = split_command(command, redirects if scoped else None)
         if not segs:
             return Decision("deny", "empty command")
         parsed = [(s, _tokens(s)) for s in segs]
@@ -195,27 +390,63 @@ class ApprovalPolicy:
         if self.data.get("auto_approve_all"):
             return Decision("allow", "auto_approve_all")
 
+        cur: Optional[Path] = (Path(cwd).resolve() if cwd else self.root) if scoped else None
+        cwds = [cur]  # every directory the line runs in (it may `cd`)
+        by_scope = False
         for s, toks in parsed:
             if not toks:
                 continue
+            before = cur
+            if scoped and toks[0] == "cd":
+                cur = self._cd_target(toks, cur)
+                cwds.append(cur)
             ok = any(_prefix_match(toks, r) for r in cfg.get("allow", [])) or any(
                 re.fullmatch(r, s) for r in cfg.get("allow_regex", [])
             )
-            if not ok:
+            if ok:
+                continue
+            if not scoped:
                 return Decision(self._default("commands").action, f"'{s.split()[0] if s.split() else s}' is not in the allow list")
-        return Decision("allow", "all parts match allow rules")
+            why = self._scoped_reason(toks, before)
+            if why:
+                return Decision(self._default("commands").action, f"'{s.split()[0]}': {why}")
+            by_scope = True
+        for target in redirects:
+            for c in cwds:
+                why = self._path_reason(target, c)
+                if why:
+                    return Decision(self._default("commands").action, f"redirect: {why}")
+        if redirects:
+            by_scope = True
+        return Decision("allow", "inside trusted paths" if by_scope else "all parts match allow rules")
 
     def check_write(self, rel_path: str) -> Decision:
         cfg = self.data.get("files", {})
         p = rel_path.replace("\\", "/")
+        abs_p: Optional[Path] = None
+        names = [p]  # what the globs are matched against: as given + relative to its trusted root
+        if self.root is not None:
+            try:
+                abs_p = _resolve_path(p, self.root)
+            except (RuntimeError, OSError):
+                abs_p = None
+            if abs_p is not None:
+                for r in self.trusted_roots():
+                    if abs_p == r or r in abs_p.parents:
+                        names.append(abs_p.relative_to(r).as_posix())
+                        break
         for g in cfg.get("deny", []):
-            if fnmatch.fnmatch(p, g):
+            if any(fnmatch.fnmatch(n, g) for n in names):
                 return Decision("deny", f"matches deny pattern '{g}'")
         if self.data.get("auto_approve_all"):
             return Decision("allow", "auto_approve_all")
+        if abs_p is not None and self._protected(abs_p):
+            return Decision("ask", "this is the approval policy file")
         for g in cfg.get("allow", []):
-            if fnmatch.fnmatch(p, g):
+            if any(fnmatch.fnmatch(n, g) for n in names):
                 return Decision("allow", f"matches allow pattern '{g}'")
+        if self._scoped() and abs_p is not None and self._within(abs_p):
+            return Decision("allow", "inside trusted paths")
         return self._default("files")
 
     # --------------------------------------------------------- persistence

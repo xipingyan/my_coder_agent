@@ -12,7 +12,7 @@ from coder_agent.paths import user_dir
 from coder_agent.prompts import PromptBuilder, TaskTypeRegistry
 from coder_agent.tools import ToolContext, default_registry
 
-from conftest import FakeProvider
+from conftest import FakeProvider, strict_policy
 
 have_gdb = shutil.which("gdb") and shutil.which("gcc")
 needs_gdb = pytest.mark.skipif(not have_gdb, reason="gdb and gcc are required")
@@ -198,6 +198,7 @@ def test_missing_debug_info_and_bad_input_give_actionable_errors(project, prog):
 
 @needs_gdb
 def test_debugger_runs_the_program_so_it_needs_the_same_approval_as_running_it(project, prog):
+    strict_policy(project)
     prog("crash", CRASH_C)
     asked = []
 

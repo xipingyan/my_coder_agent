@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 from coder_agent.gui import dialogs, main_window
 from coder_agent.gui.main_window import MainWindow
 
-from conftest import FakeProvider
+from conftest import FakeProvider, strict_policy
 
 
 @pytest.fixture(scope="module")
@@ -51,6 +51,7 @@ def wait_idle(app, win, timeout=10):
 def test_gui_turn_approval_rewind_and_edit(app, project, monkeypatch, tmp_path):
     QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
     seen = []
+    strict_policy(project)
 
     def fake_exec(self):
         seen.append(self.windowTitle())

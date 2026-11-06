@@ -205,7 +205,7 @@ def apply_patch_preview(ctx: ToolContext, a: dict) -> str:
 
 
 def fs_tools() -> list[Tool]:
-    P = "path relative to the project root"
+    P = "path relative to the project root (absolute paths are accepted only inside trusted dirs such as /tmp)"
     return [
         Tool(
             "read_file",

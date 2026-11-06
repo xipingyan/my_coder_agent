@@ -5,7 +5,7 @@ from coder_agent.engine import Engine
 from coder_agent.events import EventBus
 from coder_agent.session import Session
 
-from conftest import FakeProvider
+from conftest import FakeProvider, strict_policy
 
 
 def make_engine(project, script, approver=None, cfg=None, report_usage=True):
@@ -30,6 +30,7 @@ def test_simple_answer(project):
 
 
 def test_tool_roundtrip_with_approval_and_diff(project):
+    strict_policy(project)
     asked = []
 
     def approver(req):
@@ -53,6 +54,7 @@ def test_tool_roundtrip_with_approval_and_diff(project):
 
 
 def test_rejection_is_reported_to_model_and_file_untouched(project):
+    strict_policy(project)
     script = [
         {"tool_calls": [("write_file", {"path": "a.txt", "content": "x"})]},
         {"content": "ok, skipped"},

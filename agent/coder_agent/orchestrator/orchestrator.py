@@ -110,6 +110,7 @@ class Orchestrator:
                 snapshots=e.session.snapshots,
                 agent_id=aid,
                 max_output_chars=self.cfg.context.tool_output_max_chars,
+                extra_roots=e.policy.extra_roots,
             )
             agent = Agent(
                 aid, self.provider, registry, tool_ctx, e.policy, e.approver,

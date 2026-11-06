@@ -212,11 +212,16 @@ confirm_each_stage = true
 ```toml
 auto_approve_all = false            # true：除 deny 外全部自动放行
 
+[paths]
+auto_approve = true                 # 工程目录 + trusted 目录内的写文件/命令自动放行
+trusted = ["/tmp"]                  # 工程根之外的可信目录，可自行追加，如 "~/scratch"
+
 [commands]
 default = "ask"                     # ask | deny
 allow = ["cmake --build", "ctest", "git status", "make", "ninja"]   # 按词前缀匹配
 allow_regex = []
 deny = ["sudo", "rm -rf /", "mkfs"]
+# confirm = [...]                   # 即使路径可信也要确认的命令；不写则用内置列表（curl/wget/pip/apt/docker/kill/git push 等）
 
 [files]
 default = "ask"
@@ -224,8 +229,11 @@ allow = ["build/*", "tmp/*"]        # glob，'*' 也匹配 '/'
 deny = [".git/*"]
 ```
 
-规则顺序：`deny` > `allow` > `default`。复合命令（`&&`、`||`、`;`、`|`）会拆开，**每一段都必须被允许**；
-含 `$(...)`、反引号、heredoc、输出重定向（`>`）的命令一律需要人工确认。
+规则顺序：`deny` > `allow` > 可信路径 > `default`。复合命令（`&&`、`||`、`;`、`|`）会拆开，**每一段都必须被允许**；
+含 `$(...)`、反引号、heredoc 的命令一律需要人工确认。
+
+可信路径（工程根 + `[paths].trusted`）：写文件、以及所有路径参数/重定向目标（`>`、`>>`，含 `cd` 之后的工作目录）都落在可信目录内的命令自动放行，
+文件工具也可读写这些目录。变量展开（`$HOME`）、URL、删除可信目录本身、`rm *`、审批文件 `approval.toml` 仍需确认。
 
 ### 任务类型前缀
 

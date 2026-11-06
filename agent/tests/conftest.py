@@ -22,6 +22,13 @@ def project(tmp_path) -> Path:
     return p
 
 
+def strict_policy(project: Path) -> None:
+    """Switch off path-based auto approval for this project, to test the ask/allow-list flow."""
+    d = project / ".agent"
+    d.mkdir(exist_ok=True)
+    (d / "approval.toml").write_text("[paths]\nauto_approve = false\n", encoding="utf-8")
+
+
 class FakeProvider(LLMProvider):
     """Plays back scripted replies. Each reply: dict(content=str, tool_calls=[(name, args)], thinking=str)."""
 

@@ -44,7 +44,10 @@ class SnapshotStore:
     def _record(self, path: Path) -> None:
         if self.current is None:
             return
-        rel = self._rel(path)
+        try:
+            rel = self._rel(path)
+        except ValueError:
+            return  # outside the project (e.g. /tmp): cannot be rewound
         man = self._manifest(self.current)
         if rel in man["files"]:
             return

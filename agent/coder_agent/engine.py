@@ -88,6 +88,7 @@ class Engine:
                 emit=lambda kind, data: self.bus.emit(kind, "main", **data),
                 snapshots=self.session.snapshots,
                 max_output_chars=self.config.context.tool_output_max_chars,
+                extra_roots=self.policy.extra_roots,
             )
             agent = Agent(
                 "main", provider, registry, tool_ctx, self.policy, self.approver,

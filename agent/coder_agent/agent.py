@@ -214,7 +214,11 @@ class Agent:
         if tool.kind == "exec":
             kind = "command"
             subject = tool.command_of(args) if tool.command_of else args.get("command", "")
-            decision = self.policy.check_command(subject)
+            try:
+                cwd = ctx.resolve(args.get("cwd") or ".")
+            except Exception as e:  # noqa: BLE001
+                return f"ERROR: {e}"
+            decision = self.policy.check_command(subject, cwd)
         else:
             kind = "write"
             try:

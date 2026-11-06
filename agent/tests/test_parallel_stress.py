@@ -125,6 +125,9 @@ def test_approvals_are_asked_one_at_a_time(project):
     from coder_agent.engine import Engine
     from coder_agent.events import EventBus
 
+    from conftest import strict_policy
+
+    strict_policy(project)
     state = {"active": 0, "max": 0, "asked": 0}
     lock = threading.Lock()
 
