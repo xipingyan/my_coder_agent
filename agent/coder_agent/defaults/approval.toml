@@ -1,0 +1,35 @@
+# Approval policy for the coding agent.
+#
+# Decision order:  deny  >  allow  >  default (ask the user).
+# Rules for commands are token prefixes: "cmake --build" matches "cmake --build build -j8".
+# Compound commands (&&, ||, ;, |) are split; EVERY part must be allowed.
+# Commands using $(...), backticks, heredocs or output redirection always ask.
+# Rules for files are globs on the project-relative path ('*' also matches '/').
+#
+# This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
+# (lists are merged, scalars are overridden).
+
+auto_approve_all = false   # true: run everything not denied without asking (use with care)
+
+[commands]
+default = "ask"            # ask | deny
+allow = [
+    "ls", "pwd", "cd", "cat", "head", "tail", "wc", "echo", "which", "tree", "diff", "stat", "file",
+    "grep", "rg", "sort", "uniq",
+    "git status", "git diff", "git log", "git show", "git branch", "git rev-parse",
+    "cmake --version", "cmake -S", "cmake -B", "cmake --build", "ctest",
+    "make", "ninja",
+    "g++ --version", "clang++ --version",
+    "node --version", "npm run build", "npm test", "npx tsc",
+    "python --version", "python3 --version",
+]
+allow_regex = []
+deny = [
+    "sudo", "su", "mkfs", "dd", "shutdown", "reboot", "poweroff",
+    "rm -rf /", "rm -rf ~", "rm -rf *", "chmod -R 777",
+]
+
+[files]
+default = "ask"            # ask | deny
+allow = ["build/*", "tmp/*"]
+deny = [".git/*"]
