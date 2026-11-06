@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -15,6 +16,17 @@ from .snapshots import SnapshotStore
 
 def _id() -> str:
     return uuid.uuid4().hex[:8]
+
+
+@dataclass
+class SessionInfo:
+    """Cheap summary of a saved session, for history lists."""
+
+    id: str
+    title: str
+    updated: float
+    turns: int
+    status: str  # status of the last turn on the active path
 
 
 @dataclass
@@ -126,12 +138,21 @@ class Session:
         return any(t.ran_commands for t in path[ids.index(turn_id):]) if turn_id in ids else False
 
     # ------------------------------------------------------------ persistence
+    def info(self) -> SessionInfo:
+        path = self.path()
+        ordered = sorted(self.turns.values(), key=lambda t: t.created)
+        first = path[0] if path else (ordered[0] if ordered else None)
+        last = path[-1] if path else (ordered[-1] if ordered else None)
+        lines = first.prompt.strip().splitlines() if first else []
+        return SessionInfo(self.id, (lines[0] if lines else "")[:100], time.time(), len(path), last.status if last else "")
+
     def save(self) -> None:
         self.file.parent.mkdir(parents=True, exist_ok=True)
         data = {"id": self.id, "head": self.head, "turns": [asdict(t) for t in self.turns.values()]}
         tmp = self.file.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(self.file)
+        self.file.with_suffix(".meta").write_text(json.dumps(asdict(self.info()), ensure_ascii=False), encoding="utf-8")
 
     @classmethod
     def load(cls, root: Path, session_id: str) -> "Session":
@@ -139,10 +160,44 @@ class Session:
         data = json.loads(s.file.read_text(encoding="utf-8"))
         s.head = data.get("head")
         for td in data.get("turns", []):
-            s.turns[td["id"]] = Turn(**td)
+            t = Turn(**td)
+            if t.status == "running":  # the app died / was killed in the middle of this turn
+                t.status = "interrupted"
+            s.turns[t.id] = t
         return s
 
     @classmethod
     def list_sessions(cls, root: Path) -> list[str]:
         d = project_cache_dir(Path(root).resolve()) / "sessions"
         return sorted((p.stem for p in d.glob("*.json")), reverse=True) if d.is_dir() else []
+
+    @classmethod
+    def summaries(cls, root: Path) -> list[SessionInfo]:
+        """Saved sessions (newest first) that contain at least one turn. Uses the small ``.meta``
+        files; sessions saved by older versions are loaded once and get a meta file."""
+        root = Path(root).resolve()
+        out: list[SessionInfo] = []
+        for sid in cls.list_sessions(root):
+            meta = project_cache_dir(root) / "sessions" / f"{sid}.meta"
+            info: Optional[SessionInfo] = None
+            try:
+                info = SessionInfo(**json.loads(meta.read_text(encoding="utf-8")))
+            except (OSError, ValueError, TypeError):
+                try:
+                    s = cls.load(root, sid)
+                    info = s.info()
+                    info.updated = s.file.stat().st_mtime
+                    meta.write_text(json.dumps(asdict(info), ensure_ascii=False), encoding="utf-8")
+                except (OSError, ValueError, TypeError, KeyError):
+                    continue  # unreadable file: skip it
+            if info.turns > 0:
+                out.append(info)
+        return sorted(out, key=lambda i: i.updated, reverse=True)
+
+    @classmethod
+    def delete(cls, root: Path, session_id: str) -> None:
+        root = Path(root).resolve()
+        d = project_cache_dir(root)
+        for ext in (".json", ".meta", ".tmp"):
+            (d / "sessions" / f"{session_id}{ext}").unlink(missing_ok=True)
+        shutil.rmtree(d / "snapshots" / session_id, ignore_errors=True)

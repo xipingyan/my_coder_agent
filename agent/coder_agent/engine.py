@@ -77,6 +77,7 @@ class Engine:
             self.cancel_event.clear()
             tt = self.task_types.get(task_type or self.task_types.detect(prompt))
             turn = self.session.new_turn(prompt, tt.name)
+            self.session.save()
             self.bus.emit("turn_started", turn_id=turn.id, task_type=tt.name, prompt=prompt)
 
             provider = self._provider_override or create_provider(self.config)
@@ -130,6 +131,7 @@ class Engine:
         try:
             self.cancel_event.clear()
             turn = self.session.new_turn(goal, "plan")
+            self.session.save()
             self.bus.emit("turn_started", turn_id=turn.id, task_type="plan", prompt=goal)
             provider = self._provider_override or create_provider(self.config)
             status, text, result = "error", "", None

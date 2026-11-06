@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
         for text, fn, key in (
             ("Open project...", self.choose_project, QKeySequence.StandardKey.Open),
             ("New session", self.new_session, QKeySequence.StandardKey.New),
-            ("Open session...", self.open_session, None),
+            ("Session history", self.open_session, None),
             ("Settings...", self.open_settings, QKeySequence("Ctrl+,")),
             ("Quit", self.close, QKeySequence.StandardKey.Quit),
         ):
@@ -168,15 +168,31 @@ class MainWindow(QMainWindow):
         st.clicked.connect(self.open_settings)
         tb.addWidget(st)
 
-        # left: history
-        left = QWidget()
-        ll = QVBoxLayout(left)
-        ll.setContentsMargins(4, 4, 4, 4)
-        ll.addWidget(QLabel("Turns (right-click: edit / rewind)"))
+        # left: turns of this session / session history
         self.history = QListWidget()
         self.history.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history.customContextMenuRequested.connect(self._history_menu)
-        ll.addWidget(self.history)
+        self.history.setToolTip("Right-click a turn: edit the prompt and run again, or rewind")
+
+        sess = QWidget()
+        sl = QVBoxLayout(sess)
+        sl.setContentsMargins(0, 4, 0, 0)
+        new_btn = QPushButton("New session")
+        new_btn.clicked.connect(self.new_session)
+        sl.addWidget(new_btn)
+        self.sessions = QListWidget()
+        self.sessions.setWordWrap(True)
+        self.sessions.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.sessions.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.sessions.customContextMenuRequested.connect(self._sessions_menu)
+        self.sessions.itemDoubleClicked.connect(lambda it: self.open_session_id(it.data(Qt.ItemDataRole.UserRole)))
+        self.sessions.setToolTip("Double-click to open, right-click for more")
+        sl.addWidget(self.sessions)
+
+        self.left_tabs = QTabWidget()
+        self.left_tabs.addTab(self.history, "Turns")
+        self.left_tabs.addTab(sess, "Sessions")
+        left = self.left_tabs
 
         # middle: chat + input
         mid = QWidget()
@@ -254,24 +270,106 @@ class MainWindow(QMainWindow):
         self.effort_combo.blockSignals(True)
         self.effort_combo.setCurrentText(self.cfg.thinking.effort)
         self.effort_combo.blockSignals(False)
+        self._reset_views()
         self.render_session()
         self.refresh_history()
-        self.ctx_bar.setValue(0)
+        self.refresh_sessions()
+        self._update_context_bar()
+
+    def _reset_views(self) -> None:
+        """Forget everything that belongs to the previous session (live logs are not persisted)."""
+        for view in (self.activity, self.thinking, self.commands, self.docs, self.plan_view, self.chat):
+            view.clear()
+        self._plan_dict = None
+        self._pending_docs.clear()
+        self._block = None
+        self._think_chars = 0
+        self.llm_label.setText("")
+        self._set_state("idle", "")
+
+    def _update_context_bar(self) -> None:
+        """Estimated context usage of the history that the next prompt will carry."""
+        if not self.engine:
+            return
+        msgs = self.engine.session.build_messages()
+        tokens, mx = self.engine.ctx_mgr.tokens(msgs), self.cfg.context.max_tokens
+        pct = int(tokens / max(1, mx) * 100)
+        self.ctx_bar.setValue(min(100, pct))
+        self.ctx_bar.setFormat(f"context {tokens / 1000:.1f}k / {mx / 1000:.0f}k ({pct}%)" if tokens else "context 0%")
 
     def new_session(self) -> None:
-        if self.engine and not self.busy:
-            self.open_project(self.engine.root)
+        if self.busy or not self.engine:
+            return
+        if not self.engine.session.turns:  # already empty: nothing to switch away from
+            self._reset_views()
+            self.left_tabs.setCurrentIndex(0)
+            return
+        self.open_project(self.engine.root)
+        self.left_tabs.setCurrentIndex(0)
 
     def open_session(self) -> None:
+        """Menu entry: show the session history."""
+        self.left_tabs.setCurrentIndex(1)
+        self.refresh_sessions()
+
+    def open_session_id(self, session_id: str) -> None:
+        if self.busy or not self.engine or session_id == self.engine.session.id:
+            return
+        try:
+            self.open_project(self.engine.root, session_id)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            QMessageBox.warning(self, "Cannot open session", f"{session_id}: {e}")
+            return
+        self.left_tabs.setCurrentIndex(0)
+
+    def refresh_sessions(self) -> None:
+        self.sessions.clear()
+        if not self.engine:
+            return
+        current = self.engine.session.id
+        for info in Session.summaries(self.engine.root):
+            when = time.strftime("%m-%d %H:%M", time.localtime(info.updated))
+            mark = "● " if info.id == current else ""
+            it = QListWidgetItem(f"{mark}{when}  {info.title or '(empty)'}")
+            it.setData(Qt.ItemDataRole.UserRole, info.id)
+            it.setToolTip(f"{info.title}\n{info.turns} turn(s), last status: {info.status}\n{info.id}")
+            if info.id == current:
+                f = it.font()
+                f.setBold(True)
+                it.setFont(f)
+            self.sessions.addItem(it)
+
+    def _sessions_menu(self, pos) -> None:
+        it = self.sessions.itemAt(pos)
+        if not it or not self.engine:
+            return
+        sid = it.data(Qt.ItemDataRole.UserRole)
+        m = QMenu(self)
+        a_open = m.addAction("Open")
+        a_del = m.addAction("Delete session...")
+        a_open.setEnabled(not self.busy and sid != self.engine.session.id)
+        a_del.setEnabled(not self.busy)
+        chosen = m.exec(self.sessions.mapToGlobal(pos))
+        if chosen == a_open:
+            self.open_session_id(sid)
+        elif chosen == a_del:
+            self.delete_session(sid)
+
+    def delete_session(self, session_id: str) -> None:
         if not self.engine or self.busy:
             return
-        ids = Session.list_sessions(self.engine.root)
-        if not ids:
-            QMessageBox.information(self, "Sessions", "No saved sessions for this project.")
+        r = QMessageBox.question(
+            self, "Delete session",
+            "Delete this session and its file snapshots?\nFiles in the project are not touched, but this "
+            "session can no longer be rewound.")
+        if r != QMessageBox.StandardButton.Yes:
             return
-        sid, ok = QInputDialog.getItem(self, "Open session", "Session:", ids, 0, False)
-        if ok:
-            self.open_project(self.engine.root, sid)
+        was_current = session_id == self.engine.session.id
+        Session.delete(self.engine.root, session_id)
+        if was_current:
+            self.open_project(self.engine.root)  # start a fresh session
+        else:
+            self.refresh_sessions()
 
     def _reload_task_types(self) -> None:
         cur = self.task_combo.currentText()
@@ -448,6 +546,8 @@ class MainWindow(QMainWindow):
         restored, _ = self.engine.rewind(turn_id, keep_branch)
         self.render_session()
         self.refresh_history()
+        self.refresh_sessions()
+        self._update_context_bar()
         self.chat.line(f"\n[rewound; restored {len(restored)} file(s)]", color="warn")
 
     # ------------------------------------------------------------ rendering
@@ -515,6 +615,7 @@ class MainWindow(QMainWindow):
             self.chat.line(d["prompt"])
             self._log(ev, f"task type {d['task_type']}")
             self.refresh_history()
+            self.refresh_sessions()
         elif k == "thinking_delta":
             self._think_chars += len(d["text"])
             self.thinking.write(d["text"], color="muted")
@@ -570,6 +671,7 @@ class MainWindow(QMainWindow):
             self.chat.line(f"\n-- {d['status']} --", color="muted")
             self._log(ev, d["status"])
             self.refresh_history()
+            self.refresh_sessions()
         elif k == "agent_finished":
             self._log(ev, f"{d['status']} after {d['steps']} step(s)")
         elif k in ("plan_created", "plan_started", "subtask_started", "subtask_finished", "plan_finished"):
