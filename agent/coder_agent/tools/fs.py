@@ -33,7 +33,7 @@ def _read_text(path: Path) -> str:
 
 # ---------------------------------------------------------------- read_file
 def read_file(ctx: ToolContext, a: dict) -> str:
-    path = ctx.resolve(a["path"])
+    path = ctx.resolve_readable(a["path"])
     lines = _read_text(path).splitlines()
     total = len(lines)
     start = max(1, a.get("start_line", 1))
@@ -50,7 +50,7 @@ def read_file(ctx: ToolContext, a: dict) -> str:
 
 # ----------------------------------------------------------------- list_dir
 def list_dir(ctx: ToolContext, a: dict) -> str:
-    base = ctx.resolve(a.get("path", "."))
+    base = ctx.resolve_readable(a.get("path", "."))
     if not base.is_dir():
         raise ToolError(f"not a directory: {a.get('path', '.')}")
     depth = max(1, min(a.get("depth", 1), 4))

@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
-from .paths import github_dir, project_cache_dir, user_dir
+from .paths import builtin_skills_dir, github_dir, project_cache_dir, user_dir
 from .tools.base import Tool, ToolContext, ToolError
 from .util import parse_front_matter
 
@@ -71,14 +73,52 @@ def instructions_for_paths(root: Path, rel_paths: list[str]) -> str:
 
 
 # ------------------------------------------------------------------- skills
-def skill_index(root: Path) -> list[IndexEntry]:
-    entries: list[IndexEntry] = []
-    for base, label_root in ((github_dir(root) / "skills", root), (user_dir() / "skills", None)):
+@dataclass
+class Skill:
+    name: str
+    description: str
+    path: Path
+    body: str
+    triggers: Optional[re.Pattern] = None  # when a failing command's output matches, the body is injected
+    source: str = "project"  # builtin | user | project
+
+    def shown_path(self, root: Path) -> str:
+        try:
+            return self.path.relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            return str(self.path)  # outside the project: readable through read_file (see agent_read_roots)
+
+
+def load_skills(root: Path) -> dict[str, Skill]:
+    """All skills by name. Later layers override earlier ones: builtin < ~/.coder_agent/skills < .github/skills."""
+    root = Path(root).resolve()
+    skills: dict[str, Skill] = {}
+    for source, base in (
+        ("builtin", builtin_skills_dir()),
+        ("user", user_dir() / "skills"),
+        ("project", github_dir(root) / "skills"),
+    ):
         for f in sorted(base.glob("*/SKILL.md")):
-            meta, _ = parse_front_matter(f.read_text(encoding="utf-8", errors="replace"))
-            shown = f.relative_to(root).as_posix() if label_root else str(f)
-            entries.append(IndexEntry(meta.get("name", f.parent.name), meta.get("description", ""), shown))
-    return entries
+            meta, body = parse_front_matter(f.read_text(encoding="utf-8", errors="replace"))
+            trig = None
+            if meta.get("triggers"):
+                try:
+                    trig = re.compile(meta["triggers"], re.IGNORECASE)
+                except re.error:
+                    trig = None  # a bad pattern must not break the agent
+            name = meta.get("name", f.parent.name)
+            skills[name] = Skill(name, meta.get("description", ""), f.resolve(), body.strip(), trig, source)
+    return skills
+
+
+def skill_index(root: Path) -> list[IndexEntry]:
+    return [IndexEntry(s.name, s.description, s.shown_path(root)) for s in load_skills(root).values()]
+
+
+def matching_skills(root: Path, text: str, exclude: Optional[set[str]] = None) -> list[Skill]:
+    """Skills whose ``triggers`` pattern matches ``text`` (e.g. the output of a failed build)."""
+    return [s for s in load_skills(root).values()
+            if s.triggers and s.name not in (exclude or set()) and s.triggers.search(text)]
 
 
 # ---------------------------------------------------------- module docs

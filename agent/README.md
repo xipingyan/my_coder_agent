@@ -14,6 +14,7 @@
 | 任务类型前缀 | 按任务类型（C++ 实现、调试、CMake、TypeScript UI、重构、文档、评审…）给 prompt 加前缀，可自动识别、可手选、可自行修改 |
 | 上下文压缩 | 上下文长度可配（默认 128k），占用达 95% 自动压缩到约 60%；压缩算法可插拔 |
 | 知识库 | `.github/` 的 instructions / skills、每个子模块的 `MODULE.md`、agent 自己的记忆（`remember` 工具） |
+| 调试纪律 | 内置 `debug-cpp` skill：先列疑点、逐个验证、两次不行就用 gdb；命令连续失败时自动提醒；`debug_backtrace` 工具封装 gdb batch 取回溯 |
 | 文档分析 | 子任务开始前，先读取相关 `MODULE.md` 并生成精简摘要给子 agent，同时显示在 "Docs read" 窗口 |
 | 活动可见 | Activity 窗口按时间线显示所有 agent 的动作；状态栏显示当前状态/耗时/上下文占用/tok/s |
 | thinking 控制 | `reasoning_effort`、`enable_thinking`、`thinking_token_budget`、思考字数上限（超限自动关闭思考重试） |
@@ -111,7 +112,7 @@ coder-agent-cli --root /path/to/project                                  # 交�
 | `~/.coder_agent/config.toml` | 全局配置（服务、thinking、上下文…） |
 | `~/.coder_agent/approval.toml` | 全局审批规则（首次运行自动生成，带注释的模板） |
 | `~/.coder_agent/prompts/*.md` | 覆盖/新增任务类型前缀；`base.md` 覆盖基础 system prompt |
-| `~/.coder_agent/skills/*/SKILL.md` | agent 共享的 skills |
+| `~/.coder_agent/skills/*/SKILL.md` | agent 共享的 skills（覆盖同名内置 skill） |
 | `~/.coder_agent/memory/global.md` | agent 的全局记忆 |
 | `<工程>/.agent/config.toml` | 工程级配置，覆盖全局 |
 | `<工程>/.agent/approval.toml` | 工程级审批规则（列表与全局合并） |
@@ -160,6 +161,9 @@ keep_recent_units = 10              # 最近这些消息单元不会被压缩
 [agent]
 max_steps = 40
 parallelism = 1                     # 并行子 agent 数；多卡时再调大
+auto_skills = true                  # 命令失败时自动注入匹配 triggers 的 skill
+failure_hint_after = 2              # 连续失败几次后提醒"先列疑点"（0 = 关闭）
+gdb_hint_after = 4                  # 连续失败几次后提醒"改用调试器"（0 = 关闭）
 
 [orchestrator]
 max_subtasks = 8
@@ -211,6 +215,53 @@ Task type: C++ implementation.
 - ...
 ```
 
+### Skills（技能）与调试纪律
+
+skill 是一份 Markdown 说明书，prompt 里只放一行索引（名称 + 描述 + 路径），模型需要时用 `read_file` 读取全文，所以 `description` 要写清楚"什么情况下用"。
+三层来源，**同名时后者覆盖前者**：
+
+| 层 | 位置 | 说明 |
+|---|---|---|
+| 内置 | `coder_agent/skills/<名字>/SKILL.md` | 随程序发布，目前有 `debug-cpp` |
+| 全局（agent 自己的） | `~/.coder_agent/skills/<名字>/SKILL.md` | 所有工程共享，手工创建文件即可 |
+| 工程 | `<工程>/.github/skills/<名字>/SKILL.md` | 只对这个工程生效 |
+
+不需要重启，下一次提交就会读取。全局和内置 skill 位于工程之外，`read_file` 对这两个目录开放**只读**访问，其他工程外路径仍然禁止。
+
+手动添加一个 skill：
+
+```bash
+mkdir -p ~/.coder_agent/skills/my-skill
+cat > ~/.coder_agent/skills/my-skill/SKILL.md <<'EOF'
+---
+name: my-skill
+description: 一句话说明什么时候该用它
+triggers: error:|Segmentation fault     # 可选：命令失败且输出匹配这个正则时，自动把全文附到工具结果里
+---
+正文（建议 600 字以内，步骤化，小模型更容易照做）
+EOF
+```
+
+`triggers` 是可选的正则（不区分大小写）：只有**失败的 `run_command`** 输出匹配时才会触发，每次运行同一个 skill 只注入一次，不依赖模型主动去读。
+
+**调试纪律（`debug-cpp`）**
+
+要让本地模型"不要无目的地尝试"，只靠一份说明书不够，所以分四层：
+
+1. 内置 skill `debug-cpp`：读第一条错误 → 写出 2-3 个疑点（带证据和最小检查）→ 一次验证一个，每个最多 2 次，没用就回退 → 两个疑点失败、或崩溃/挂死/结果错误时用 gdb → 读回溯，找到第一个属于自己代码的栈帧。
+2. 基础 prompt 和 `cpp_impl` / `cmake` / `cpp_debug` 前缀里都有一句"失败时先按 `debug-cpp` 做"。
+3. 命令失败且输出匹配 `triggers` 时，自动把 skill 全文附到工具结果里。
+4. agent 循环统计**连续失败**的 `run_command`：第 `failure_hint_after` 次（默认 2）追加"停止盲目修改，先列疑点"的提醒；第 `gdb_hint_after` 次（默认 4，之后每 2 次重复）追加"改用调试器"的提醒。`ls`、`cat`、`grep` 等不证明任何事的命令不会重置计数，真正成功的命令（构建、运行）会重置，使用 `debug_backtrace` 也会重置。
+
+对应配置（`[agent]`）：`auto_skills = true`、`failure_hint_after = 2`、`gdb_hint_after = 4`，设为 0 即关闭对应提醒。
+
+**`debug_backtrace` 工具**：模型自己拼 gdb 命令很容易出错（忘了 batch、没有 `-g`、卡在交互提示），这个工具统一处理：
+
+- 参数：`program`（可执行文件）、`args`、`breakpoint`（`文件:行号` 或函数名，停下后显示参数和局部变量）、`timeout`、`cwd`。
+- 崩溃：给出信号和调用栈、参数、局部变量；挂死：超时后中断并显示每个线程卡在哪里；正常退出：明确说"没有崩溃"并建议下断点。
+- 程序没有调试信息时直接报错并提示 `cmake -DCMAKE_BUILD_TYPE=Debug`；没装 gdb 时提示安装，并给出 `-fsanitize=address,undefined` 的替代方法。
+- 审批：它会**运行**程序，所以按"运行该程序"的命令（如 `./build/app`）走审批规则，和直接 `run_command` 一致；`gdb` 本身没有加入默认放行列表（gdb 可以执行任意命令）。
+
 ### 增加新的上下文压缩算法
 
 ```python
@@ -235,7 +286,8 @@ register_strategy(MyStrategy())      # 然后在配置里写 algorithm = "mine"
 coder_agent/
   config.py  events.py  approval.py  knowledge.py  agent.py  engine.py  cli.py
   llm/            provider 抽象 + OpenAI 兼容实现 + <think> 解析 + 文本形式 tool call 兜底解析
-  tools/          read_file / list_dir / find_files / grep_search / write_file / apply_patch / run_command / remember
+  tools/          read_file / list_dir / find_files / grep_search / write_file / apply_patch / run_command / debug_backtrace / remember
+  skills/         内置 skills（debug-cpp）
   context/        token 估算（可用服务端 usage 校准）+ 可插拔压缩算法
   prompts/        任务类型注册表 + system prompt 组装 + 内置前缀（defaults/*.md）
   session/        会话树、回退、文件快照

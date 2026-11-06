@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
+from ..paths import agent_read_roots
 from ..util import truncate_middle
 
 
@@ -27,9 +28,21 @@ class ToolContext:
     snapshots: Optional[SnapshotRecorder] = None
     agent_id: str = "main"
     max_output_chars: int = 12000
+    read_roots: list[Path] = field(default_factory=agent_read_roots)  # extra READ-only locations
 
     def __post_init__(self) -> None:
         self.root = Path(self.root).resolve()
+
+    def resolve_readable(self, p: str) -> Path:
+        """Like ``resolve`` but also accepts files inside ``read_roots`` (the agent's own skills)."""
+        path = Path(p).expanduser()
+        if path.is_absolute():
+            real = path.resolve()
+            for r in self.read_roots:
+                r = Path(r).resolve()
+                if real == r or r in real.parents:
+                    return real
+        return self.resolve(p)
 
     def resolve(self, p: str) -> Path:
         """Resolve ``p`` (relative to root or absolute) and refuse to leave the root."""
@@ -56,6 +69,7 @@ class Tool:
     func: Callable[[ToolContext, dict], str]
     kind: str = "read"  # read | write | exec
     preview: Optional[Callable[[ToolContext, dict], str]] = None  # diff / detail for approval
+    command_of: Optional[Callable[[dict], str]] = None  # exec tools: the command line the approval policy judges
 
     def schema(self) -> dict:
         return {

@@ -11,3 +11,4 @@ Task type: CMake.
 - Keep each module's CMakeLists.txt in its own directory and add it with add_subdirectory.
 - Use out-of-source builds in build/ (cmake -S . -B build; cmake --build build -j).
 - Do not hard-code absolute paths. Enable tests with enable_testing() / add_test when tests exist.
+- If configure/build fails: follow the `debug-cpp` skill (read the FIRST error, list suspects, verify one at a time).

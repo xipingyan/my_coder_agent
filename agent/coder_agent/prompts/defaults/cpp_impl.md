@@ -12,3 +12,4 @@ Task type: C++ implementation.
 - Mark const / noexcept / override where appropriate; pass large objects by const reference.
 - Register new source files in the owning CMakeLists.txt.
 - Build with cmake after the change and fix all warnings you introduced.
+- If the build or the program fails: follow the `debug-cpp` skill (suspects first, one at a time, gdb after two misses). No trial and error.

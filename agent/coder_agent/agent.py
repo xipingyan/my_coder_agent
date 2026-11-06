@@ -3,19 +3,47 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .approval import ApprovalPolicy, ApprovalRequest, ApprovalResponse
+from . import knowledge
+from .approval import ApprovalPolicy, ApprovalRequest, ApprovalResponse, split_command
 from .config import AgentConfig, ThinkingConfig
 from .context import ContextManager
 from .events import EventBus
 from .llm import LLMCancelled, LLMError, LLMProvider, ToolCall, extract_text_tool_calls
 from .tools.base import ToolContext, ToolRegistry
+from .util import truncate_middle
 
 Approver = Callable[[ApprovalRequest], ApprovalResponse]
+
+# Commands that say nothing about whether the code under work is fixed: they do not reset the failure streak.
+NEUTRAL_COMMANDS = {"ls", "cat", "pwd", "echo", "cd", "head", "tail", "grep", "rg", "find", "which", "tree",
+                    "wc", "stat", "file", "git", "diff", "sort", "uniq", "mkdir"}
+
+FAILURE_MARKERS = re.compile(
+    r"\berror:|fatal error|undefined reference|\*\*\* \[|Segmentation fault|core dumped|\bAborted\b|"
+    r"terminate called|AddressSanitizer|runtime error:|Assertion .* failed")
+
+SUSPECT_HINT = (
+    "[agent hint] {n} commands in a row failed. STOP trying fixes. In your next reply, write 2-3 suspected causes "
+    "(most likely first) based on the code you just wrote, each with its evidence (error text / line) and one cheap "
+    "check. Then verify them ONE at a time. Do not change any file before you have listed them."
+)
+GDB_HINT = (
+    "[agent hint] {n} failed attempts in a row - guessing is not working. If the program crashes, hangs or prints "
+    "wrong results: build with -g -O0 and call the debug_backtrace tool, then base your next hypothesis on the "
+    "backtrace and locals. For compile errors: re-read the FIRST error and the exact lines it points to before "
+    "editing again. Revert changes that did not help."
+)
+
+
+def _command_failed(ok: bool, text: str) -> bool:
+    m = re.match(r"exit code: (-?\d+)", text)
+    return (not ok) or bool(m and m.group(1) != "0")
 
 
 @dataclass
@@ -57,6 +85,8 @@ class Agent:
         self.thinking_cfg = thinking_cfg
         self.cancel = cancel
         self.ran_commands = False
+        self._fail_streak = 0  # consecutive failing build/run commands
+        self._injected: set[str] = set()  # skills already injected during this run
         self._tools = registry.schemas()
 
     # -------------------------------------------------------------- events
@@ -139,8 +169,42 @@ class Agent:
             self.ran_commands = True
         self._emit("status", state="running_tool", detail=tc.name)
         ok, text = self.registry.execute(tc.name, args, self.tool_ctx)
+        text = self._after_tool(tool, args, ok, text)
         self._emit("tool_result", name=tc.name, ok=ok, text=text, id=tc.id)
         return text
+
+    def _after_tool(self, tool, args: dict, ok: bool, text: str) -> str:
+        """Discipline for debugging: skill injection on failures and a nudge when commands keep failing."""
+        if tool.name == "debug_backtrace":
+            self._fail_streak = 0  # the model escalated to the debugger: start counting afresh
+            return text
+        if tool.name != "run_command":
+            return text
+        segs, _ = split_command(args.get("command", ""))
+        neutral = all((s.split() or [""])[0] in NEUTRAL_COMMANDS for s in segs)
+        # `... | tail` or `; echo $?` hide the exit status, so real failure markers in the output count too
+        failed = _command_failed(ok, text) or (not neutral and bool(FAILURE_MARKERS.search(text)))
+        if not failed:
+            if not neutral:
+                self._fail_streak = 0
+            return text
+
+        self._fail_streak += 1
+        n, extra = self._fail_streak, []
+        if self.cfg.auto_skills:
+            for s in knowledge.matching_skills(self.tool_ctx.root, text, self._injected):
+                self._injected.add(s.name)
+                extra.append(f"[skill '{s.name}' was loaded because this command failed - follow it]\n"
+                             + truncate_middle(s.body, 4500))
+                self._emit("warning", text=f"skill '{s.name}' injected after a failed command")
+        a, b = self.cfg.failure_hint_after, self.cfg.gdb_hint_after
+        if b and n >= b and (n - b) % 2 == 0:
+            extra.append(GDB_HINT.format(n=n))
+        elif a and n == a:
+            extra.append(SUSPECT_HINT.format(n=n))
+        if n in (a, b) or (b and n > b and (n - b) % 2 == 0):
+            self._emit("warning", text=f"{n} failed commands in a row - nudging the model to list suspects / use the debugger")
+        return text + ("\n\n" + "\n\n".join(extra) if extra else "")
 
     def _authorise(self, tool, args: dict) -> Optional[str]:
         """Return an error text if the call must not run, else None."""
@@ -148,7 +212,8 @@ class Agent:
             return None
         ctx = self.tool_ctx
         if tool.kind == "exec":
-            kind, subject = "command", args.get("command", "")
+            kind = "command"
+            subject = tool.command_of(args) if tool.command_of else args.get("command", "")
             decision = self.policy.check_command(subject)
         else:
             kind = "write"
@@ -175,7 +240,8 @@ class Agent:
             title=subject if kind == "write" else f"Run command ({decision.reason})",
             detail=detail,
             args=args,
-            suggested_rule=self.policy.suggest_rule(kind, {**args, "path": subject} if kind == "write" else args),
+            suggested_rule=self.policy.suggest_rule(
+                kind, {"path": subject} if kind == "write" else {"command": subject}),
         )
         self._emit("status", state="waiting_user", detail=req.title)
         self._emit("approval_requested", request=req)

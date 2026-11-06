@@ -23,3 +23,13 @@ def project_cache_dir(root: Path) -> Path:
 
 def github_dir(root: Path) -> Path:
     return Path(root) / ".github"
+
+
+def builtin_skills_dir() -> Path:
+    """Skills shipped with the agent itself (package data)."""
+    return Path(__file__).resolve().parent / "skills"
+
+
+def agent_read_roots() -> list[Path]:
+    """Directories outside the project that tools may READ (never write): the agent's own skills."""
+    return [builtin_skills_dir(), user_dir() / "skills"]

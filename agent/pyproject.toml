@@ -25,7 +25,7 @@ coder-agent-stress = "coder_agent.stress:main"
 include = ["coder_agent*"]
 
 [tool.setuptools.package-data]
-coder_agent = ["prompts/defaults/*.md", "defaults/*"]
+coder_agent = ["prompts/defaults/*.md", "defaults/*", "skills/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
