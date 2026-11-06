@@ -74,7 +74,11 @@ python -m coder_agent.gui.app        # 不安装命令时的等价写法
   - **Commands**：命令的实时输出
   - **Docs read**：agent 读取/分析的文档及摘要
 - 工具栏：Task type（`(auto)` 自动识别）、Thinking effort、Mode（单 agent / 计划）、Stop。
-- 底部状态栏：当前状态和已耗时（例如 `Waiting for model: step 3 (35s) thinking 1200 chars`）、上下文占用条、首字延迟和 tok/s。
+- 底部状态栏：当前状态和已耗时（例如 `Waiting for model: step 3 (35s) thinking 1200 chars`）、首字延迟和 tok/s，以及上下文长度：
+  - `context 12.3k / 128.0k (9%)`：**当前 cache 长度 / 配置的最大值**。没有 `~` 表示是服务端对上一次请求实际报告的 token 数（prompt + 已生成），带 `~` 表示本地估算（例如刚打开历史会话时）。悬停可看精确数字和压缩触发点（95%）。
+  - `server cache 128.0k | model max 256.0k`：**服务端实际运行的 cache 长度 / 模型本身支持的最大长度**（Ollama 读 `/api/ps` 和 `/api/show`，vLLM 读 `/v1/models` 的 `max_model_len`）。
+    打开工程、保存设置、每轮结束时自动刷新，点击可手动刷新。如果配置的 `context.max_tokens` 与服务端不一致会变色（橙色：配置更小，红色：配置更大，压缩会触发得太晚），
+    `Settings > Context & agent > Detect...` 可一键把配置改成服务端的值。命令行 `coder-agent-cli --check` 也会打印这两个数。
 
 ### 计划模式（拆子任务）
 

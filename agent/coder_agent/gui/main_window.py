@@ -36,6 +36,7 @@ from ..approval import ApprovalRequest
 from ..config import AppConfig, load_config, save_config
 from ..engine import Engine
 from ..events import Event, EventBus
+from ..llm import ContextInfo, fetch_context_info
 from ..orchestrator import Plan, SubTask
 from ..prompts import PromptBuilder
 from ..session import Session
@@ -98,6 +99,9 @@ class MainWindow(QMainWindow):
         self.plans = PlanBridge()
         self.plans.requested.connect(self.on_plan_request)
         self._plan_dict: Optional[dict] = None
+        self._server_ctx: Optional[ContextInfo] = None
+        self._info_worker: Optional[TurnWorker] = None
+        self._ctx_used = 0
 
         self._block: Optional[str] = None
         self._pending_docs: dict[str, str] = {}
@@ -238,8 +242,13 @@ class MainWindow(QMainWindow):
         sb.addWidget(self.state_label, 1)
         self.llm_label = QLabel("")
         sb.addPermanentWidget(self.llm_label)
+        self.server_ctx_btn = QPushButton("server cache: ?")
+        self.server_ctx_btn.setFlat(True)
+        self.server_ctx_btn.setToolTip("Context length reported by the server. Click to refresh.")
+        self.server_ctx_btn.clicked.connect(self.refresh_server_info)
+        sb.addPermanentWidget(self.server_ctx_btn)
         self.ctx_bar = QProgressBar()
-        self.ctx_bar.setFixedWidth(260)
+        self.ctx_bar.setFixedWidth(300)
         self.ctx_bar.setRange(0, 100)
         self.ctx_bar.setFormat("context 0%")
         sb.addPermanentWidget(self.ctx_bar)
@@ -275,6 +284,7 @@ class MainWindow(QMainWindow):
         self.refresh_history()
         self.refresh_sessions()
         self._update_context_bar()
+        self.refresh_server_info()
 
     def _reset_views(self) -> None:
         """Forget everything that belongs to the previous session (live logs are not persisted)."""
@@ -292,10 +302,74 @@ class MainWindow(QMainWindow):
         if not self.engine:
             return
         msgs = self.engine.session.build_messages()
-        tokens, mx = self.engine.ctx_mgr.tokens(msgs), self.cfg.context.max_tokens
-        pct = int(tokens / max(1, mx) * 100)
+        self._set_ctx_bar(self.engine.ctx_mgr.tokens(msgs), self.cfg.context.max_tokens, False)
+
+    @staticmethod
+    def _fmt_tok(n: float) -> str:
+        return f"{n / 1024:.1f}k" if n >= 1024 else str(int(n))
+
+    def _set_ctx_bar(self, tokens: int, max_tokens: int, exact: bool) -> None:
+        """Current cache length vs. the configured maximum. ``~`` marks a local estimate; no ``~`` means
+        the number was reported by the server for the last request (prompt + generated tokens)."""
+        self._ctx_used = tokens
+        pct = int(tokens / max(1, max_tokens) * 100)
         self.ctx_bar.setValue(min(100, pct))
-        self.ctx_bar.setFormat(f"context {tokens / 1000:.1f}k / {mx / 1000:.0f}k ({pct}%)" if tokens else "context 0%")
+        if tokens:
+            mark = "" if exact else "~"
+            self.ctx_bar.setFormat(f"context {mark}{self._fmt_tok(tokens)} / {self._fmt_tok(max_tokens)} ({pct}%)")
+        else:
+            self.ctx_bar.setFormat(f"context 0 / {self._fmt_tok(max_tokens)}")
+        cc = self.cfg.context
+        self.ctx_bar.setToolTip(
+            f"Current cache length: {tokens:,} tokens ({'reported by the server' if exact else 'local estimate'})\n"
+            f"Configured maximum (context.max_tokens): {max_tokens:,}\n"
+            f"Compression starts at {int(cc.compress_threshold * 100)}% = {int(max_tokens * cc.compress_threshold):,} tokens"
+            f" and shrinks to {int(cc.compress_target * 100)}%.")
+
+    # ------------------------------------------------------- server context
+    def refresh_server_info(self) -> None:
+        """Ask the server (in the background) how long its cache really is."""
+        if self._info_worker and self._info_worker.isRunning():
+            return
+        server = self.cfg.server.model_copy()
+        self.server_ctx_btn.setText("server cache: checking...")
+        w = TurnWorker(lambda: fetch_context_info(server))
+        self._info_worker = w
+        w.finished.connect(lambda: self._server_info_done(w))
+        w.start()
+
+    def _server_info_done(self, w: TurnWorker) -> None:
+        self._server_ctx = w.result if isinstance(w.result, ContextInfo) else ContextInfo(error=w.error or "failed")
+        self._render_server_ctx()
+
+    def _render_server_ctx(self) -> None:
+        info, mx = self._server_ctx, self.cfg.context.max_tokens
+        btn = self.server_ctx_btn
+        btn.setStyleSheet("")
+        if info is None:
+            btn.setText("server cache: ?")
+            return
+        if not info.loaded and not info.model_max:
+            btn.setText("server cache: unknown")
+            btn.setToolTip(f"{info.describe()}\nClick to retry.")
+            return
+        parts = []
+        if info.loaded:
+            parts.append(f"server cache {self._fmt_tok(info.loaded)}" + (" (configured)" if info.loaded_is_configured else ""))
+        if info.model_max:
+            parts.append(f"model max {self._fmt_tok(info.model_max)}")
+        btn.setText(" | ".join(parts))
+        tip = [info.describe(), f"Configured context.max_tokens: {mx:,}"]
+        if info.loaded and mx > info.loaded:
+            btn.setStyleSheet("color: #d9534f;")
+            tip.append("WARNING: the configured maximum is larger than the server's cache, so compression would start "
+                       "too late and requests may be truncated. Settings > Context & agent > Detect.")
+        elif info.loaded and mx != info.loaded:
+            btn.setStyleSheet("color: #e08a1e;")
+            tip.append("The configured maximum is smaller than the server's cache (safe, but part of it is unused). "
+                       "Settings > Context & agent > Detect.")
+        tip.append("Click to refresh.")
+        btn.setToolTip("\n".join(tip))
 
     def new_session(self) -> None:
         if self.busy or not self.engine:
@@ -404,6 +478,8 @@ class MainWindow(QMainWindow):
         self.effort_combo.blockSignals(True)
         self.effort_combo.setCurrentText(new.thinking.effort)
         self.effort_combo.blockSignals(False)
+        self._update_context_bar()
+        self.refresh_server_info()
 
     def show_system_prompt(self) -> None:
         if not self.engine:
@@ -658,9 +734,7 @@ class MainWindow(QMainWindow):
             self._log(ev, f"{el:.1f}s ttft={ttft if ttft is None else round(ttft, 1)} usage={u} finish={d.get('finish')}")
             self._think_chars = 0
         elif k == "context_usage":
-            pct = int(d["ratio"] * 100)
-            self.ctx_bar.setValue(min(100, pct))
-            self.ctx_bar.setFormat(f"context {d['tokens'] / 1000:.1f}k / {d['max_tokens'] / 1000:.0f}k ({pct}%)")
+            self._set_ctx_bar(d["tokens"], d["max_tokens"], bool(d.get("exact")))
         elif k == "context_compressed":
             self.chat.line(f"\n[context compressed: {d['before']} -> {d['after']} tokens ({d['algorithm']})]", color="warn")
             self._log(ev, f"{d['before']} -> {d['after']} tokens via {d['algorithm']}", "warn")
@@ -672,6 +746,7 @@ class MainWindow(QMainWindow):
             self._log(ev, d["status"])
             self.refresh_history()
             self.refresh_sessions()
+            self.refresh_server_info()
         elif k == "agent_finished":
             self._log(ev, f"{d['status']} after {d['steps']} step(s)")
         elif k in ("plan_created", "plan_started", "subtask_started", "subtask_finished", "plan_finished"):
@@ -737,4 +812,6 @@ class MainWindow(QMainWindow):
             self.engine.cancel()
             if self.worker:
                 self.worker.wait(5000)
+        if self._info_worker:
+            self._info_worker.wait(6000)
         super().closeEvent(e)

@@ -10,7 +10,7 @@ from .approval import ApprovalRequest, ApprovalResponse
 from .config import load_config
 from .engine import Engine
 from .events import Event, EventBus
-from .llm import LLMError, create_provider
+from .llm import LLMError, create_provider, fetch_context_info
 
 
 def _printer(show_thinking: bool):
@@ -118,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
             print("connection failed:", e)
             return 1
         print("server ok, models:", ", ".join(models))
+        print(f"context of '{cfg.server.model}':", fetch_context_info(cfg.server).describe(),
+              f"| configured context.max_tokens = {cfg.context.max_tokens:,}")
         return 0
 
     bus = EventBus()

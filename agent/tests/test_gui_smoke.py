@@ -229,3 +229,60 @@ def test_new_session_clears_every_panel_and_history_reopens_old_session(app, pro
     win.delete_session(first_id)
     assert win.sessions.count() == 0 and win.engine.session.id != first_id and win.chat.toPlainText() == ""
     win.close()
+
+
+def _wait_info(app, win):
+    end = time.time() + 5
+    while time.time() < end and win._info_worker and not win._info_worker.isFinished():
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+def test_gui_shows_current_cache_length_and_server_limits(app, project, monkeypatch, tmp_path):
+    from coder_agent.llm import ContextInfo
+
+    QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, str(tmp_path / "qs4"))
+    monkeypatch.setattr(main_window, "fetch_context_info",
+                        lambda server: ContextInfo(loaded=131072, model_max=262144, source="ollama"))
+    win = MainWindow(project)
+    _wait_info(app, win)
+    assert win.server_ctx_btn.text() == "server cache 128.0k | model max 256.0k"
+    assert win.server_ctx_btn.styleSheet() == ""  # configured 131072 == server 131072
+    assert win.ctx_bar.text() == "context 0 / 128.0k"
+
+    # configured maximum larger than what the server really has -> warning colour + explanation
+    win.cfg.context.max_tokens = 262144
+    win._render_server_ctx()
+    assert "d9534f" in win.server_ctx_btn.styleSheet() and "WARNING" in win.server_ctx_btn.toolTip()
+    win.cfg.context.max_tokens = 65536
+    win._render_server_ctx()
+    assert "e08a1e" in win.server_ctx_btn.styleSheet()
+    win.cfg.context.max_tokens = 131072
+    win.engine.config.context.max_tokens = 131072
+    win._render_server_ctx()
+
+    # after a request the bar shows the number the server reported (prompt 100 + completion 10), no '~'
+    win.engine._provider_override = FakeProvider([{"content": "hi"}])
+    win.input.setPlainText("hello")
+    win.send()
+    wait_idle(app, win)
+    _wait_info(app, win)
+    assert win.ctx_bar.text() == "context 110 / 128.0k (0%)" and "reported by the server" in win.ctx_bar.toolTip()
+    assert "131,072" in win.ctx_bar.toolTip() and "124,518" in win.ctx_bar.toolTip()  # 95% threshold
+
+    # an estimate (e.g. when reopening a session) is marked with '~'
+    win._update_context_bar()
+    assert win.ctx_bar.text().startswith("context ~") or win.ctx_bar.text().startswith("context 0")
+    win.close()
+
+
+def test_gui_server_info_unavailable(app, project, monkeypatch, tmp_path):
+    from coder_agent.llm import ContextInfo
+
+    QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, str(tmp_path / "qs5"))
+    monkeypatch.setattr(main_window, "fetch_context_info", lambda server: ContextInfo(error="refused"))
+    win = MainWindow(project)
+    _wait_info(app, win)
+    assert win.server_ctx_btn.text() == "server cache: unknown" and "refused" in win.server_ctx_btn.toolTip()
+    win.close()

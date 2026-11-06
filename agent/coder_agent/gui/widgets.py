@@ -157,6 +157,7 @@ class ModelForm(QWidget):
         super().__init__()
         self._model_cls = type(model)
         self._getters: dict[str, Getter] = {}
+        self._widgets: dict[str, QWidget] = {}
         layout = QFormLayout(self)
         layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         for name, field in self._model_cls.model_fields.items():
@@ -167,6 +168,19 @@ class ModelForm(QWidget):
                 w.setToolTip(descriptions[name])
             layout.addRow(name, w)
             self._getters[name] = getter
+            self._widgets[name] = w
+
+    def set_value(self, name: str, value: Any) -> None:
+        """Programmatically change a field (numbers, text and combo boxes)."""
+        w = self._widgets[name]
+        if isinstance(w, (QSpinBox, QDoubleSpinBox)):
+            w.setValue(value)
+        elif isinstance(w, QLineEdit):
+            w.setText(str(value))
+        elif isinstance(w, QComboBox):
+            w.setCurrentText(str(value))
+        elif isinstance(w, QCheckBox):
+            w.setChecked(bool(value))
 
     def values(self) -> dict[str, Any]:
         out = {}

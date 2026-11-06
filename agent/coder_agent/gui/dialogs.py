@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from ..approval import ApprovalRequest, ApprovalResponse, ensure_user_policy
 from ..config import AppConfig
 from ..context import available_strategies
-from ..llm import LLMError, create_provider
+from ..llm import LLMError, create_provider, fetch_context_info
 from ..orchestrator import CONTINUE, RETRY, STOP, Plan, PlanError, StageReport, SubTask
 from ..paths import user_dir
 from .widgets import DiffView, ModelForm, RichLog, mono_font
@@ -397,6 +397,9 @@ class SettingsDialog(QDialog):
         ctx = QWidget()
         cl = QVBoxLayout(ctx)
         cl.addWidget(group("Context / compression", self.forms["context"]))
+        detect = QPushButton("Detect server context length and use it for max_tokens")
+        detect.clicked.connect(self._detect_ctx)
+        cl.addWidget(detect)
         cl.addWidget(group("Agent", self.forms["agent"]))
         cl.addWidget(group("Subtask planning", self.forms["orchestrator"]))
         cl.addWidget(group("Paths", self.forms["paths"]))
@@ -424,11 +427,29 @@ class SettingsDialog(QDialog):
 
     def _test(self) -> None:
         try:
-            models = create_provider(self._collect()).list_models()
+            cfg = self._collect()
+            models = create_provider(cfg).list_models()
         except (LLMError, ValueError) as e:
             QMessageBox.warning(self, "Connection failed", str(e))
             return
-        QMessageBox.information(self, "Server reachable", "Models:\n" + "\n".join(models))
+        info = fetch_context_info(cfg.server)
+        QMessageBox.information(
+            self, "Server reachable",
+            "Models:\n" + "\n".join(models) + f"\n\nContext of '{cfg.server.model}': {info.describe()}")
+
+    def _detect_ctx(self) -> None:
+        try:
+            cfg = self._collect()
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid settings", str(e))
+            return
+        info = fetch_context_info(cfg.server)
+        if info.loaded:
+            self.forms["context"].set_value("max_tokens", info.loaded)
+            QMessageBox.information(self, "Server context length",
+                                    f"{info.describe()}\n\ncontext.max_tokens set to {info.loaded:,}.")
+        else:
+            QMessageBox.warning(self, "Server context length", info.describe())
 
     def accept(self) -> None:
         try:

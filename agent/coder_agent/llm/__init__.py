@@ -7,6 +7,7 @@ from typing import Callable
 from ..config import AppConfig
 from .base import LLMCancelled, LLMChunk, LLMError, LLMProvider, ToolCall, Usage
 from .openai_compat import OpenAICompatProvider
+from .server_info import ContextInfo, fetch_context_info
 from .think_parser import ThinkParser
 from .toolparse import extract_text_tool_calls
 
@@ -35,6 +36,7 @@ register_provider("ollama", _openai_compat)  # Ollama speaks the OpenAI protocol
 # "ovms" is intentionally not registered yet.
 
 __all__ = [
+    "ContextInfo",
     "LLMCancelled",
     "LLMChunk",
     "LLMError",
@@ -45,5 +47,6 @@ __all__ = [
     "Usage",
     "create_provider",
     "extract_text_tool_calls",
+    "fetch_context_info",
     "register_provider",
 ]

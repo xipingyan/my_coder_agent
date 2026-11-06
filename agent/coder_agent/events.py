@@ -11,7 +11,7 @@ tool_result         name, ok (bool), text (truncated)
 command_output      text
 approval_requested  request (ApprovalRequest)
 approval_resolved   allow (bool), auto (bool), reason
-context_usage       tokens, max_tokens, ratio
+context_usage       tokens, max_tokens, ratio, exact (True = number reported by the server)
 context_compressed  before, after, algorithm
 turn_started        turn_id
 turn_finished       turn_id, status

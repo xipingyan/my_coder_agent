@@ -71,7 +71,7 @@ class Agent:
     def _maybe_compress(self, messages: list[dict], on_compact) -> None:
         tokens = self.ctx_mgr.tokens(messages, self._tools)
         self._emit("context_usage", tokens=tokens, max_tokens=self.ctx_mgr.cfg.max_tokens,
-                   ratio=tokens / max(1, self.ctx_mgr.cfg.max_tokens))
+                   ratio=tokens / max(1, self.ctx_mgr.cfg.max_tokens), exact=False)
         if not self.ctx_mgr.needs_compression(messages, self._tools):
             return
         self._emit("status", state="waiting_model", detail="compressing context")
@@ -81,7 +81,7 @@ class Agent:
             on_compact(list(new))
         self._emit("context_compressed", before=info.before, after=info.after, algorithm=info.algorithm)
         self._emit("context_usage", tokens=info.after, max_tokens=self.ctx_mgr.cfg.max_tokens,
-                   ratio=info.after / max(1, self.ctx_mgr.cfg.max_tokens))
+                   ratio=info.after / max(1, self.ctx_mgr.cfg.max_tokens), exact=False)
 
     # ------------------------------------------------------------ model call
     def _call_llm(self, messages: list[dict], thinking: Optional[bool]):
@@ -229,6 +229,10 @@ class Agent:
                     ttft=ttft,
                     finish=finish,
                 )
+                if usage:  # what the server really holds now: prompt + what it just generated
+                    used = usage.prompt_tokens + usage.completion_tokens
+                    self._emit("context_usage", tokens=used, max_tokens=self.ctx_mgr.cfg.max_tokens,
+                               ratio=used / max(1, self.ctx_mgr.cfg.max_tokens), exact=True)
 
                 if not calls and text:
                     text, calls = extract_text_tool_calls(text, known)
