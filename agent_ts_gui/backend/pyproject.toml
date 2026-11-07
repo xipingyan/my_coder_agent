@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coder-agent-backend"
+version = "0.1.0"
+description = "Coder Agent backend (WebSocket server; GUI is the Electron/TS front-end)"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40",
+    "pydantic>=2.5",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+coder-agent-cli = "coder_agent.cli:main"
+coder-agent-stress = "coder_agent.stress:main"
+
+[tool.setuptools.packages.find]
+include = ["coder_agent*"]
+
+[tool.setuptools.package-data]
+coder_agent = ["prompts/defaults/*.md", "defaults/*", "skills/*/SKILL.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

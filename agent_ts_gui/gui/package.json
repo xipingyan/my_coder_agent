@@ -1,0 +1,17 @@
+{
+  "name": "coder-agent-gui",
+  "version": "0.1.0",
+  "description": "Coder Agent GUI (Electron + TypeScript front-end, Python backend)",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "npm run build && electron --no-sandbox .",
+    "start": "npm run build && electron --no-sandbox ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}

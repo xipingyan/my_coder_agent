@@ -1,0 +1,48 @@
+# Approval policy for the coding agent.
+#
+# Decision order:  deny  >  allow  >  trusted paths  >  default (ask the user).
+# Rules for commands are token prefixes: "cmake --build" matches "cmake --build build -j8".
+# Compound commands (&&, ||, ;, |) are split; EVERY part must be allowed.
+# Commands using $(...), backticks or heredocs always ask.
+# Rules for files are globs on the project-relative path ('*' also matches '/').
+#
+# Trusted paths: file writes and commands whose paths (arguments, redirect targets, working
+# directory after `cd`) all lie inside the project root or one of [paths].trusted run WITHOUT asking,
+# except commands listed in [commands].confirm (network, installs, killing processes, git push ...).
+#
+# This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
+# (lists are merged, scalars are overridden). The agent can never edit these two files without asking.
+
+auto_approve_all = false   # true: run everything not denied without asking (use with care)
+
+[paths]
+auto_approve = true        # false: ask again for everything that is not explicitly allowed below
+trusted = ["/tmp",
+    /home/xiping/mygitee/my_coder_agent/agent_cpp/,
+    /home/xiping/mygitee/my_coder_agent/agent_ts_gui
+    ]         # directories besides the project root; add your own, e.g. "~/scratch"
+
+[commands]
+default = "ask"            # ask | deny
+allow = [
+    "ls", "pwd", "cd", "cat", "head", "tail", "wc", "echo", "which", "tree", "diff", "stat", "file",
+    "grep", "rg", "sort", "uniq",
+    "git status", "git diff", "git log", "git show", "git branch", "git rev-parse",
+    "cmake --version", "cmake -S", "cmake -B", "cmake --build", "ctest",
+    "make", "ninja",
+    "g++ --version", "clang++ --version",
+    "node --version", "npm run build", "npm test", "npx tsc",
+    "python --version", "python3 --version",
+]
+allow_regex = []
+deny = [
+    "sudo", "su", "mkfs", "dd", "shutdown", "reboot", "poweroff",
+    "rm -rf /", "rm -rf ~", "rm -rf *", "chmod -R 777",
+]
+# Never auto-run because of trusted paths (an explicit `allow` rule above still wins). Omit to use the built-in list.
+# confirm = ["curl", "wget", "pip", "git push", ...]
+
+[files]
+default = "ask"            # ask | deny
+allow = ["build/*", "tmp/*"]
+deny = [".git/*"]

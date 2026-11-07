@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Coder Agent</title>
+  <style>
+    body { font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif; margin: 0; background: #f5f5f5; }
+    #status { padding: 12px 16px; font-size: 14px; color: #333; }
+    #url { font-family: monospace; color: #4a90d9; }
+  </style>
+</head>
+<body>
+  <div id="status">正在启动 Python 后端...</div>
+  <div id="url"></div>
+  <script>
+    window.api.onBackendUrl((url) => {
+      document.getElementById("status").textContent = "后端已连接:";
+      document.getElementById("url").textContent = url;
+    });
+    window.api.onBackendExit((code) => {
+      document.getElementById("status").textContent = "后端已退出 (code=" + code + ")";
+    });
+  </script>
+</body>
+</html>
