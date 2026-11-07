@@ -429,8 +429,8 @@ def run(argv: list[str], provider_factory: ProviderFactory = None) -> int:
 
     async def _run() -> None:
         server = Server(Path(args.root) if args.root else None, provider_factory)
-        server = await websockets.serve(lambda ws, *args: handler(ws, server), "127.0.0.1", 0)
-        port = server.sockets[0].getsockname()[1]
+        srv = await websockets.serve(lambda ws, *args: handler(ws, server), "127.0.0.1", 0)
+        port = srv.sockets[0].getsockname()[1]
         print(f"WS_URL=ws://127.0.0.1:{port}", flush=True)
         await asyncio.Future()  # run forever
 

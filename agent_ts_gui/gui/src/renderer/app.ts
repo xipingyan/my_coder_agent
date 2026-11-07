@@ -322,6 +322,7 @@ function afterSubmit(r: any) {
 
 // ------------------------------------------------------------------- events
 window.api.onEvent(onEvent);
+(window as any).__dispatchEvent = onEvent; // test hook (CDP smoke tests)
 
 function onEvent(ev: AgentEvent) {
   const k = ev.event;
@@ -539,8 +540,8 @@ window.api.onBackendExit((code) => {
 });
 
 (async function boot() {
-  const last = await window.api.getLastProject();
-  if (last) await openProject(last);
+  const root = (await window.api.getBackendRoot()) || (await window.api.getLastProject());
+  if (root) await openProject(root);
   else {
     chat.line("No project open yet. Click the project label above to choose one.", "c-muted");
     $("state-label").textContent = "No project";

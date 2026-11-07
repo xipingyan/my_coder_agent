@@ -9,6 +9,7 @@ import WebSocket from "ws";
 const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
 let backend: ChildProcess | null = null;
 let backendUrl: string | null = null;
+let backendRoot: string | null = null;
 let window: BrowserWindow | null = null;
 let ws: WebSocket | null = null;
 
@@ -108,6 +109,7 @@ async function createWindowAsync(root: string | null) {
     return;
   }
   backendUrl = url;
+  backendRoot = startRoot;
   console.log("[main] backend ready:", url);
   window.webContents.send("backend-url", url);
   connectWs(url);
@@ -122,6 +124,7 @@ app.whenReady().then(() => {
   createWindowAsync(root);
 
   ipcMain.handle("backend-url", () => backendUrl);
+  ipcMain.handle("backend-root", () => backendRoot);
   ipcMain.handle("ws-send", (_e, payload: object) => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   });
