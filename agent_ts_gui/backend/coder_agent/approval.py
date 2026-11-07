@@ -385,10 +385,10 @@ class ApprovalPolicy:
             for rule in cfg.get("deny", []):
                 if toks and _prefix_match(toks, rule):
                     return Decision("deny", f"matches deny rule '{rule}'")
-        if unsafe:
-            return Decision("ask", f"contains {unsafe}")
         if self.data.get("auto_approve_all"):
             return Decision("allow", "auto_approve_all")
+        if unsafe:
+            return Decision("ask", f"contains {unsafe}")
 
         cur: Optional[Path] = (Path(cwd).resolve() if cwd else self.root) if scoped else None
         cwds = [cur]  # every directory the line runs in (it may `cd`)

@@ -44,11 +44,15 @@ ProviderFactory = Optional[Callable[[], LLMProvider]]  # injectable for tests
 
 # --------------------------------------------------------------- async asks
 class _Pending:
-    """A question asked from a worker thread, answered by the GUI via ``answer``."""
+    """A question asked from a worker thread, answered by the GUI via ``answer``.
 
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
-        self.loop = loop
-        self.done = asyncio.Event()  # created on the loop thread (see Server.question)
+    ``done`` is a ``threading.Event``: it is set from the loop thread (answer /
+    detach) and waited on from a worker thread, so it must not be an
+    ``asyncio.Event`` (those are bound to one loop/thread).
+    """
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
         self.response: Any = None
         self.on_timeout: Any = None  # value used when the user cancels
 
@@ -76,6 +80,7 @@ class ApprovalAsk:
 
     def ask(self, req: ApprovalRequest) -> ApprovalResponse:
         req_id, p = self.server.question("approval", ApprovalResponse(False, "cancelled by user"))
+        # the request fields are flattened into data (kind, tool, title, ...) + req_id
         self.server.push_event("approval_requested", "main", dict(_jsonable(req), req_id=req_id))
         resp = self.server.wait(p)
         if not isinstance(resp, ApprovalResponse):  # the GUI answers with a JSON dict
@@ -174,26 +179,27 @@ class Server:
 
     def _on_bus_event(self, ev) -> None:
         """EventBus subscriber (fn(ev)) -> push_event."""
+        # agent.py also emits approval_requested (data={"request": ...}) before the
+        # approver is called; ApprovalAsk pushes the canonical flattened event with
+        # req_id, so the bus copy is dropped to avoid a duplicate.
+        if ev.kind == "approval_requested":
+            return
         self.push_event(ev.kind, ev.agent_id, ev.data)
 
     def question(self, prefix: str, on_timeout: Any) -> tuple[str, _Pending]:
-        """Create a pending question from a worker thread (Event on the loop thread)."""
-        assert self.loop is not None
+        """Create a pending question (called from a worker thread)."""
         self._counter += 1
         req_id = f"{prefix}-{self._counter}"
-        p = _Pending(self.loop)
+        p = _Pending()
         p.on_timeout = on_timeout
         self.pending[req_id] = p
         return req_id, p
 
     def wait(self, p: _Pending) -> Any:
         """Block the calling worker thread until the GUI answers or the turn is cancelled."""
-        while not p.done.is_set():
-            try:
-                asyncio.run_coroutine_threadsafe(p.done.wait(), p.loop).result(timeout=0.2)
-            except (asyncio.TimeoutError, TimeoutError):
-                if self.cancelled():
-                    return p.on_timeout
+        while not p.done.wait(timeout=0.2):
+            if self.cancelled():
+                return p.on_timeout
         return p.response
 
     def _require_engine(self) -> Engine:
@@ -333,7 +339,7 @@ class Server:
         if pend is None:
             raise RuntimeError(f"no pending request {req_id!r}")
         pend.response = p.get("response")
-        pend.loop.call_soon_threadsafe(pend.done.set)
+        pend.done.set()
         self.pending.pop(req_id, None)
         return {"ok": True}
 
