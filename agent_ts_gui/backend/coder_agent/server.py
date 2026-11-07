@@ -151,6 +151,9 @@ class Server:
             "context_estimate": self.context_estimate,
             "task_types": self.task_types,
             "system_prompt": self.system_prompt,
+            "session_turns": self.session_turns,
+            "session_summaries": self.session_summaries,
+            "session_detail": self.session_detail,
             "answer": self.answer,
         }
 
@@ -327,6 +330,42 @@ class Server:
     def task_types(self, p: dict) -> dict:
         e = self._require_engine()
         return {"task_types": e.task_types.names()}
+
+    def session_turns(self, p: dict) -> dict:
+        """Turns of the current session (active path order + branch turns), for the left panel."""
+        e = self._require_engine()
+        s = e.session
+        active = [t.id for t in s.path()]
+        out = []
+        for t in sorted(s.turns.values(), key=lambda t: t.created):
+            out.append({
+                "id": t.id,
+                "prompt": t.prompt,
+                "task_type": t.task_type,
+                "status": t.status,
+                "created": t.created,
+                "active": t.id in active,
+                "index": active.index(t.id) + 1 if t.id in active else 0,
+            })
+        return {"turns": out, "session_id": s.id}
+
+    def session_summaries(self, p: dict) -> dict:
+        e = self._require_engine()
+        return {"sessions": _jsonable(Session.summaries(e.root)), "current": e.session.id}
+
+    def session_detail(self, p: dict) -> dict:
+        """Full content of the active path turns, for replaying the chat on open."""
+        e = self._require_engine()
+        out = []
+        for t in e.session.path():
+            out.append({
+                "id": t.id,
+                "prompt": t.prompt,
+                "task_type": t.task_type,
+                "status": t.status,
+                "messages": _jsonable(t.display_messages()),
+            })
+        return {"turns": out}
 
     def system_prompt(self, p: dict) -> dict:
         e = self._require_engine()

@@ -1,0 +1,157 @@
+/* Coder Agent GUI - styled to match the old PySide6 look. */
+:root {
+  --user: #4a90d9;
+  --tool: #b07d2b;
+  --muted: #8a8a8a;
+  --error: #d9534f;
+  --warn: #e08a1e;
+  --ok: #3c9a5f;
+  --add: #3c9a5f;
+  --del: #d9534f;
+  --hunk: #3aa0b5;
+  --border: #c8c8c8;
+  --panel: #ffffff;
+  --bg: #f0f0f0;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  color: #222;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mono, .log.mono { font-family: "Noto Sans Mono CJK SC", "DejaVu Sans Mono", monospace; }
+
+/* ------------------------------------------------------------- toolbar */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+#toolbar label { display: flex; align-items: center; gap: 4px; }
+#root-label { font-weight: bold; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
+.sep { width: 1px; height: 20px; background: var(--border); }
+select, button, textarea {
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  padding: 3px 8px;
+}
+button { cursor: pointer; }
+button:disabled { color: #999; cursor: default; }
+button:not(:disabled):hover { background: #e8f0fb; }
+button.flat { border: none; background: transparent; }
+button.flat:hover { background: #e8f0fb; }
+
+/* -------------------------------------------------------------- layout */
+#body { flex: 1; display: flex; min-height: 0; padding: 4px; gap: 4px; }
+#left { width: 260px; min-width: 180px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
+#mid { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#right { width: 520px; min-width: 260px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
+
+/* tabs */
+#left-tabs, #right-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  padding: 4px 10px;
+  margin: 2px 1px 0 1px;
+  font-size: 12px;
+}
+.tab.active { background: var(--panel); border-color: var(--border); font-weight: bold; }
+.tabpage { flex: 1; min-height: 0; overflow-y: auto; }
+.hidden { display: none !important; }
+#left .tabpage { padding: 0; }
+
+/* lists */
+.list { list-style: none; margin: 0; padding: 0; }
+.list li {
+  padding: 5px 8px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list li:hover { background: #eef4fc; }
+.list li.selected { background: #d5e5f7; }
+.list li.branch { color: #999; }
+.list li.current { font-weight: bold; }
+button.wide { margin: 4px; width: calc(100% - 8px); }
+
+/* --------------------------------------------------------------- chat */
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+#input {
+  height: 110px;
+  margin: 4px 0 0 0;
+  resize: none;
+  padding: 8px;
+}
+#send-row { display: flex; justify-content: flex-end; padding-top: 4px; }
+.flex1 { flex: 1; }
+
+/* log panes (right side) */
+#right .tabpage { padding: 8px 10px; }
+.log { white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+
+/* spans */
+.c-user { color: var(--user); font-weight: bold; }
+.c-tool { color: var(--tool); }
+.c-muted { color: var(--muted); }
+.c-error { color: var(--error); }
+.c-warn { color: var(--warn); }
+.c-ok { color: var(--ok); }
+.c-add { color: var(--add); }
+.c-del { color: var(--del); }
+.c-hunk { color: var(--hunk); }
+.b { font-weight: bold; }
+.m { font-family: "Noto Sans Mono CJK SC", "DejaVu Sans Mono", monospace; }
+
+/* ---------------------------------------------------------- status bar */
+#statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+#state-label { flex: 1; }
+#llm-label { color: var(--muted); font-family: monospace; }
+#server-ctx-btn { font-size: 12px; padding: 1px 6px; }
+#server-ctx-btn.warn { color: var(--warn); }
+#server-ctx-btn.bad { color: var(--error); }
+#ctx-bar {
+  position: relative;
+  width: 300px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  overflow: hidden;
+}
+#ctx-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #cfe3f7; }
+#ctx-text { position: relative; display: block; text-align: center; line-height: 15px; font-size: 11px; }

@@ -1,23 +1,27 @@
-// Electron main process: owns the window and the Python backend subprocess.
-import { app, BrowserWindow, ipcMain } from "electron";
+// Electron main process: owns the window, the Python backend subprocess and the
+// WebSocket bridge to the backend.
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { spawn, ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
+import WebSocket from "ws";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
 let backend: ChildProcess | null = null;
 let backendUrl: string | null = null;
 let window: BrowserWindow | null = null;
+let ws: WebSocket | null = null;
 
 function findPython(): string {
   const venv = path.join(BACKEND_DIR, ".venv", "bin", "python");
   return fs.existsSync(venv) ? venv : "python3";
 }
 
+// ------------------------------------------------------------- backend proc
 function startBackend(root: string | null): Promise<string> {
   console.log("[main] starting backend, python =", findPython(), "root =", root);
   return new Promise((resolve, reject) => {
-    const args = [path.join(BACKEND_DIR, "coder_agent", "server.py")];
+    const args = ["-m", "coder_agent.server"];
     if (root) args.push("--root", root);
     const proc = spawn(findPython(), args, { cwd: BACKEND_DIR, stdio: ["pipe", "pipe", "pipe"] });
     backend = proc;
@@ -35,6 +39,7 @@ function startBackend(root: string | null): Promise<string> {
     proc.stderr.on("data", (d: Buffer) => process.stderr.write(`[backend] ${d.toString()}`));
     proc.on("exit", (code) => {
       backend = null;
+      closeWs();
       if (window && !window.isDestroyed())
         window.webContents.send("backend-exit", code);
     });
@@ -43,7 +48,39 @@ function startBackend(root: string | null): Promise<string> {
   });
 }
 
-async function createWindow(root: string | null) {
+// ------------------------------------------------------------- ws bridge
+function closeWs() {
+  if (ws) {
+    try { ws.close(); } catch { /* ignore */ }
+    ws = null;
+  }
+}
+
+function connectWs(url: string) {
+  closeWs();
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.on("open", () => console.log("[main] ws connected"));
+  socket.on("message", (data) => {
+    let msg: any;
+    try { msg = JSON.parse(String(data)); } catch { return; }
+    if (window && !window.isDestroyed()) {
+      if (msg.event) window.webContents.send("agent-event", msg);
+      else window.webContents.send("agent-reply", msg);
+    }
+  });
+  socket.on("close", () => {
+    if (ws === socket) ws = null;
+  });
+  socket.on("error", () => { /* close follows */ });
+}
+
+// ------------------------------------------------------------- last project
+function lastProjectFile(): string {
+  return path.join(app.getPath("userData"), "last-project.txt");
+}
+
+async function createWindowAsync(root: string | null) {
   window = new BrowserWindow({
     width: 1500,
     height: 900,
@@ -54,9 +91,17 @@ async function createWindow(root: string | null) {
       nodeIntegration: false,
     },
   });
+  let startRoot = root;
+  if (!startRoot) {
+    const p = lastProjectFile();
+    if (fs.existsSync(p)) {
+      const last = fs.readFileSync(p, "utf8").trim();
+      if (last && fs.existsSync(last)) startRoot = last;
+    }
+  }
   let url: string;
   try {
-    url = await startBackend(root);
+    url = await startBackend(startRoot);
   } catch (e) {
     window.webContents.send("backend-exit", null);
     window.loadFile(path.join(__dirname, "../renderer/index.html"));
@@ -65,7 +110,8 @@ async function createWindow(root: string | null) {
   backendUrl = url;
   console.log("[main] backend ready:", url);
   window.webContents.send("backend-url", url);
-  await window.loadFile(path.join(__dirname, "../renderer/index.html"));
+  connectWs(url);
+  window.loadFile(path.join(__dirname, "../renderer/index.html"));
 }
 
 app.whenReady().then(() => {
@@ -73,14 +119,34 @@ app.whenReady().then(() => {
   let root: string | null = null;
   const i = args.indexOf("--root");
   if (i >= 0 && args[i + 1]) root = args[i + 1];
-  createWindow(root);
+  createWindowAsync(root);
+
   ipcMain.handle("backend-url", () => backendUrl);
-  ipcMain.handle("restart-backend", (_e, root: string | null) => {
+  ipcMain.handle("ws-send", (_e, payload: object) => {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  });
+  ipcMain.handle("pick-directory", async () => {
+    if (!window) return null;
+    const r = await dialog.showOpenDialog(window, { properties: ["openDirectory"] });
+    return r.canceled ? null : r.filePaths[0];
+  });
+  ipcMain.handle("last-project", () => {
+    const p = lastProjectFile();
+    if (fs.existsSync(p)) {
+      const last = fs.readFileSync(p, "utf8").trim();
+      if (last && fs.existsSync(last)) return last;
+    }
+    return null;
+  });
+  ipcMain.handle("set-last-project", (_e, p: string) => {
+    try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }
+  });
+  ipcMain.handle("restart-backend", async (_e, root: string | null) => {
     backend?.kill("SIGTERM");
-    return createWindow(root);
+    await createWindowAsync(root);
   });
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(root);
+    if (BrowserWindow.getAllWindows().length === 0) createWindowAsync(root);
   });
 });
 

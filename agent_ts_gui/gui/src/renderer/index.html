@@ -3,23 +3,71 @@
 <head>
   <meta charset="UTF-8" />
   <title>Coder Agent</title>
-  <style>
-    body { font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", sans-serif; margin: 0; background: #f5f5f5; }
-    #status { padding: 12px 16px; font-size: 14px; color: #333; }
-    #url { font-family: monospace; color: #4a90d9; }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="status">正在启动 Python 后端...</div>
-  <div id="url"></div>
-  <script>
-    window.api.onBackendUrl((url) => {
-      document.getElementById("status").textContent = "后端已连接:";
-      document.getElementById("url").textContent = url;
-    });
-    window.api.onBackendExit((code) => {
-      document.getElementById("status").textContent = "后端已退出 (code=" + code + ")";
-    });
-  </script>
+  <div id="toolbar">
+    <span id="root-label" class="root">(no project)</span>
+    <span class="sep"></span>
+    <label>Task type: <select id="task-combo"><option>(auto)</option></select></label>
+    <label>Thinking effort: <select id="effort-combo">
+      <option>default</option><option>none</option><option>low</option><option>medium</option><option>high</option>
+    </select></label>
+    <label title="Plan &amp; subtasks: split the goal into small subtasks, review the plan, confirm after every stage">
+      Mode: <select id="mode-combo"><option>Single agent</option><option>Plan &amp; subtasks</option></select>
+    </label>
+    <span class="sep"></span>
+    <button id="stop-btn" disabled>Stop</button>
+    <button id="settings-btn">Settings</button>
+  </div>
+
+  <div id="body">
+    <div id="left">
+      <div id="left-tabs">
+        <button class="tab active" data-tab="turns">Turns</button>
+        <button class="tab" data-tab="sessions">Sessions</button>
+      </div>
+      <div id="tab-turns" class="tabpage">
+        <ul id="turn-list" class="list"></ul>
+      </div>
+      <div id="tab-sessions" class="tabpage hidden">
+        <button id="new-session-btn" class="wide">New session</button>
+        <ul id="session-list" class="list"></ul>
+      </div>
+    </div>
+
+    <div id="mid">
+      <div id="chat" class="log"></div>
+      <textarea id="input" placeholder="Describe the task...  (Ctrl+Enter to send)"></textarea>
+      <div id="send-row">
+        <span class="flex1"></span>
+        <button id="send-btn">Send (Ctrl+Enter)</button>
+      </div>
+    </div>
+
+    <div id="right">
+      <div id="right-tabs">
+        <button class="tab active" data-tab="activity">Activity</button>
+        <button class="tab" data-tab="plan">Plan</button>
+        <button class="tab" data-tab="thinking">Thinking</button>
+        <button class="tab" data-tab="commands">Commands</button>
+        <button class="tab" data-tab="docs">Docs read</button>
+      </div>
+      <div id="tab-activity" class="tabpage log mono"></div>
+      <div id="tab-plan" class="tabpage hidden"></div>
+      <div id="tab-thinking" class="tabpage log hidden"></div>
+      <div id="tab-commands" class="tabpage log mono hidden"></div>
+      <div id="tab-docs" class="tabpage log mono hidden"></div>
+    </div>
+  </div>
+
+  <div id="statusbar">
+    <span id="state-label">Idle</span>
+    <span id="llm-label"></span>
+    <button id="server-ctx-btn" class="flat" title="Context length reported by the server. Click to refresh.">server cache: ?</button>
+    <div id="ctx-bar"><div id="ctx-fill"></div><span id="ctx-text">context 0</span></div>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>
