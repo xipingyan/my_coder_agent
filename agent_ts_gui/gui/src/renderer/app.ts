@@ -262,9 +262,11 @@ async function refreshTurnList() {
   const r = await call("session_turns");
   if (!r || r.__error) return;
   const ul = $("turn-list");
+  (ul as any).__turns = r.turns;
   ul.innerHTML = "";
   for (const t of r.turns) {
     const li = document.createElement("li");
+    li.dataset.id = t.id;
     li.title = t.prompt;
     li.textContent = t.active
       ? `${t.index}. [${t.status}] ${short(t.prompt, 60)}`
@@ -291,9 +293,164 @@ async function refreshSessionList() {
       if (S.busy || s.id === r.current) return;
       openProject(S.root!, s.id).then(() => switchLeftTab("turns"));
     });
+    li.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showMenu(e.clientX, e.clientY, [
+        { label: "Open", enabled: !S.busy && s.id !== r.current,
+          fn: () => openProject(S.root!, s.id).then(() => switchLeftTab("turns")) },
+        { label: "Delete session...", enabled: !S.busy, fn: () => deleteSession(s.id) },
+      ]);
+    });
     ul.appendChild(li);
   }
 }
+
+async function deleteSession(sid: string) {
+  const ok = await confirmModal("Delete session",
+    "Delete this session and its file snapshots?\nFiles in the project are not touched, but this " +
+    "session can no longer be rewound.");
+  if (!ok) return;
+  const r = await call("delete_session", { session_id: sid });
+  if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
+  if (r.new_session) {
+    // the current session was deleted: the backend started a fresh one
+    resetViews();
+    await refreshTurnList();
+    await refreshSessionList();
+    refreshContextEstimate();
+    chat.line("\n[new session started]", "c-muted");
+  } else {
+    await refreshSessionList();
+  }
+}
+
+// ------------------------------------------------- context menu + modal
+function showMenu(x: number, y: number, items: { label: string; enabled?: boolean; fn?: () => void }[]) {
+  const menu = $("ctxmenu");
+  menu.innerHTML = "";
+  for (const it of items) {
+    const el = document.createElement("div");
+    el.className = "item" + (it.enabled === false ? " disabled" : "");
+    el.textContent = it.label;
+    if (it.enabled !== false && it.fn) el.addEventListener("click", () => { hideMenu(); it.fn!(); });
+    menu.appendChild(el);
+  }
+  menu.style.display = "block";
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, window.innerWidth - rect.width - 4) + "px";
+  menu.style.top = Math.min(y, window.innerHeight - rect.height - 4) + "px";
+}
+function hideMenu() { $("ctxmenu").style.display = "none"; }
+document.addEventListener("click", hideMenu);
+document.addEventListener("contextmenu", (e) => {
+  // close the menu unless the event is on the menu itself
+  if (!(e.target as HTMLElement).closest("#ctxmenu")) hideMenu();
+});
+window.addEventListener("blur", hideMenu);
+
+function confirmModal(title: string, text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.innerHTML = `<div class="head"></div><div class="body"></div>` +
+      `<div class="foot"><button class="no">Cancel</button><button class="primary yes">OK</button></div>`;
+    modal.querySelector(".head")!.textContent = title;
+    modal.querySelector(".body")!.textContent = text;
+    $("modal-backdrop").classList.add("show");
+    const done = (v: boolean) => { $("modal-backdrop").classList.remove("show"); resolve(v); };
+    modal.querySelector(".yes")!.addEventListener("click", () => done(true));
+    modal.querySelector(".no")!.addEventListener("click", () => done(false));
+  });
+}
+
+function editPromptModal(title: string, info: string, prompt: string): Promise<{ prompt: string; keepBranch: boolean } | null> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.innerHTML =
+      `<div class="head"></div>` +
+      `<div class="body"><div class="info"></div><textarea></textarea>` +
+      `<label class="check"><input type="checkbox" class="keep"/> Keep the discarded turns as an inactive branch (instead of deleting them)</label></div>` +
+      `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Run again</button></div>`;
+    modal.querySelector(".head")!.textContent = title;
+    modal.querySelector(".info")!.textContent = info;
+    const ta = modal.querySelector("textarea")!;
+    ta.value = prompt;
+    $("modal-backdrop").classList.add("show");
+    const done = (v: { prompt: string; keepBranch: boolean } | null) => {
+      $("modal-backdrop").classList.remove("show");
+      resolve(v);
+    };
+    modal.querySelector(".yes")!.addEventListener("click", () => {
+      const p = ta.value.trim();
+      if (!p) return;
+      done({ prompt: p, keepBranch: (modal.querySelector(".keep") as HTMLInputElement).checked });
+    });
+    modal.querySelector(".no")!.addEventListener("click", () => done(null));
+  });
+}
+
+// ------------------------------------------------- turn actions (rewind / edit)
+async function impactText(turnId: string): Promise<string> {
+  const r = await call("rewind_impact", { turn_id: turnId });
+  if (r && r.__error) return r.__error;
+  let txt = `${r.turns} turn(s) will be discarded.\n`;
+  txt += "Files restored to their earlier state:\n  " + (r.files.length ? r.files.join("\n  ") : "(none)");
+  if (r.ran_commands) {
+    txt += "\n\nNote: shell commands ran in these turns; their side effects (build output, installs...) are NOT reverted.";
+  }
+  return txt;
+}
+
+async function rewindTurn(turnId: string, keepBranch: boolean) {
+  const info = await impactText(turnId);
+  if (info.startsWith("RuntimeError") || info.startsWith("turn not on")) { chat.line(`\n[error] ${info}`, "c-error"); return; }
+  const ok = await confirmModal("Rewind", info + "\n\nContinue?");
+  if (!ok) return;
+  const r = await call("rewind", { turn_id: turnId, keep_branch: keepBranch });
+  if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
+  chat.line(`\n[rewound; restored ${(r.restored ?? []).length} file(s)]`, "c-warn");
+  await replaySession();
+  await refreshTurnList();
+  await refreshSessionList();
+  refreshContextEstimate();
+}
+
+async function editTurn(turnId: string) {
+  const turns = await call("session_turns");
+  if (turns && turns.__error) return;
+  const t = (turns.turns ?? []).find((x: any) => x.id === turnId);
+  if (!t) return;
+  const info = await impactText(turnId);
+  const res = await editPromptModal("Edit prompt and run again", info, t.prompt);
+  if (!res) return;
+  const wasPlan = t.task_type === "plan";
+  const task = ($("task-combo") as HTMLSelectElement).value;
+  const taskType = task === "(auto)" ? null : task;
+  const r = await call("edit_and_resubmit", {
+    turn_id: turnId, prompt: res.prompt, task_type: taskType,
+    keep_branch: res.keepBranch, plan_mode: wasPlan,
+  });
+  if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
+  setBusy(true);
+  S.thinkChars = 0;
+}
+
+function wireTurnList() {
+  const ul = $("turn-list");
+  ul.addEventListener("contextmenu", (e) => {
+    const li = (e.target as HTMLElement).closest("li");
+    if (!li || S.busy) return;
+    e.preventDefault();
+    const turns = (ul as any).__turns as any[] | undefined;
+    const t = turns?.find((x) => x.id === li.dataset.id);
+    if (!t || !t.active) return;
+    showMenu(e.clientX, e.clientY, [
+      { label: "Edit this prompt and run again...", fn: () => editTurn(t.id) },
+      { label: "Rewind to before this turn (delete it and later turns)", fn: () => rewindTurn(t.id, false) },
+      { label: "Rewind to before this turn (keep later turns as branch)", fn: () => rewindTurn(t.id, true) },
+    ]);
+  });
+}
+wireTurnList();
 
 // ------------------------------------------------------------------ sending
 function send() {
@@ -417,6 +574,13 @@ function onEvent(ev: AgentEvent) {
     docs.line(d.summary || "(empty)", "", true);
     docs.line();
     log(ev, `${d.subtask} read ${(d.docs ?? []).join(", ")} (${d.source})`);
+  } else if (k === "session_rewound") {
+    void (async () => {
+      await replaySession();
+      await refreshTurnList();
+      await refreshSessionList();
+      refreshContextEstimate();
+    })();
   } else if (k === "approval_requested") {
     // dialog comes in Phase 4; for now just log so the user sees what is pending
     log(ev, `approval requested: ${d.title ?? d.kind}`, "c-warn");

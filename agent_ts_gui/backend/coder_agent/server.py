@@ -154,6 +154,7 @@ class Server:
             "session_turns": self.session_turns,
             "session_summaries": self.session_summaries,
             "session_detail": self.session_detail,
+            "rewind_impact": self.rewind_impact,
             "answer": self.answer,
         }
 
@@ -273,6 +274,8 @@ class Server:
         if self._busy:
             raise RuntimeError("a turn is already running")
         e.rewind(p["turn_id"], bool(p.get("keep_branch")))
+        if p.get("plan_mode"):  # the original turn was a plan: keep it a plan
+            return self._start_turn(lambda: e.submit_plan(p["prompt"], self.plans.confirm_plan, self.plans.confirm_stage))
         return self._start_turn(lambda: e.submit(p["prompt"], p.get("task_type")))
 
     def new_session(self, p: dict) -> dict:
@@ -293,7 +296,11 @@ class Server:
         e = self._require_engine()
         if self._busy:
             raise RuntimeError("a turn is running")
+        was_current = p["session_id"] == e.session.id
         Session.delete(e.root, p["session_id"])
+        if was_current:
+            self.open_project({"root": str(e.root)})  # start a fresh session
+            return {"ok": True, "new_session": e.session.id}
         return {"ok": True}
 
     def save_config(self, p: dict) -> dict:
@@ -366,6 +373,21 @@ class Server:
                 "messages": _jsonable(t.display_messages()),
             })
         return {"turns": out}
+
+    def rewind_impact(self, p: dict) -> dict:
+        """What would be discarded / restored if we rewound to before ``turn_id``."""
+        e = self._require_engine()
+        s = e.session
+        ids = [t.id for t in s.path()]
+        if p["turn_id"] not in ids:
+            raise RuntimeError("turn not on the active path")
+        tail = s.path()[ids.index(p["turn_id"]):]
+        files: list[str] = []
+        for t in tail:
+            for f in s.snapshots.changed_files(t.id):
+                if f not in files:
+                    files.append(f)
+        return {"files": files, "turns": len(tail), "ran_commands": any(t.ran_commands for t in tail)}
 
     def system_prompt(self, p: dict) -> dict:
         e = self._require_engine()
