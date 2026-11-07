@@ -7,12 +7,13 @@ server -> GUI:  {"id": <n>, "result": <obj>}          (or {"id": <n>, "error": <
 server -> GUI:  {"event": <kind>, "agent_id": <str>, "data": <obj>, "ts": <float>}
                 (every EventBus event, same kinds as coder_agent/events.py)
 
-Long-running work (submit / submit_plan) is fire-and-forget: the RPC returns
-immediately with the turn id and progress arrives as events. Approval, plan
-review and stage confirmation are async questions: the server pushes an
-``approval_requested`` / ``plan_review_requested`` / ``stage_confirm_requested``
-event and waits for the matching ``answer`` RPC (this replaces the blocking
-Qt bridges of the old GUI; cancelling the turn answers with "cancelled").
+Long-running work (submit / submit_plan / edit_and_resubmit) is fire-and-forget:
+the RPC returns immediately with the turn id, progress arrives as events.
+Approval, plan review and stage confirmation are async questions: the server
+pushes an ``approval_requested`` / ``plan_review_requested`` /
+``stage_confirm_requested`` event (data carries ``req_id``) and waits for the
+matching ``answer`` RPC. This replaces the blocking Qt bridges of the old GUI;
+cancelling the turn answers the pending question with its "cancelled" value.
 """
 
 from __future__ import annotations
@@ -31,9 +32,9 @@ import websockets
 
 from .approval import ApprovalRequest, ApprovalResponse
 from .config import AppConfig, load_config, save_config
-from .engine import Engine
+from .engine import Engine, _serialised
 from .events import EventBus
-from .llm import LLMError, LLMProvider, ContextInfo, create_provider, fetch_context_info
+from .llm import LLMProvider, create_provider, fetch_context_info
 from .orchestrator import Plan, StageReport
 from .prompts import PromptBuilder, PromptSections
 from .session import Session
@@ -43,17 +44,20 @@ ProviderFactory = Optional[Callable[[], LLMProvider]]  # injectable for tests
 
 # --------------------------------------------------------------- async asks
 class _Pending:
-    """A question asked from a worker thread, answered by the GUI via RPC."""
+    """A question asked from a worker thread, answered by the GUI via ``answer``."""
 
-    def __init__(self) -> None:
-        self.event = asyncio.Event()
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+        self.done = asyncio.Event()  # created on the loop thread (see Server.question)
         self.response: Any = None
-        self.cancelled: Callable[[], bool] = lambda: False
-        self.on_timeout: Any = None  # value returned when the user cancels
+        self.on_timeout: Any = None  # value used when the user cancels
 
 
 def _jsonable(value: Any) -> Any:
-    """Make dataclass-ish payloads JSON-safe (Plan, StageReport, SubTask...)."""
+    """Make dataclass / pydantic payloads JSON-safe (Plan, StageReport, AppConfig...)."""
+    from pydantic import BaseModel
+    if isinstance(value, BaseModel):
+        return _jsonable(value.model_dump(mode="json"))
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return dataclasses.asdict(value)
     if isinstance(value, dict):
@@ -71,25 +75,17 @@ class ApprovalAsk:
         self._next = 0
 
     def ask(self, req: ApprovalRequest) -> ApprovalResponse:
-        self._next += 1
-        req_id = f"approval-{self._next}"
-        p = _Pending()
-        p.cancelled = self.server.cancelled
-        p.on_timeout = ApprovalResponse(False, "cancelled by user")
-        self.server.pending[req_id] = p
-        self.server.push_event("approval_requested", "main", _jsonable(req))
-        return self._wait(p)
-
-    def _wait(self, p: _Pending) -> Any:
-        loop = self.server.loop
-        assert loop is not None
-        while not p.event.is_set():
-            try:
-                loop.run_coroutine_threadsafe(p.event.wait(), loop).result(timeout=0.2)
-            except (asyncio.TimeoutError, TimeoutError):
-                if p.cancelled():
-                    return p.on_timeout
-        return p.response
+        req_id, p = self.server.question("approval", ApprovalResponse(False, "cancelled by user"))
+        self.server.push_event("approval_requested", "main", dict(_jsonable(req), req_id=req_id))
+        resp = self.server.wait(p)
+        if not isinstance(resp, ApprovalResponse):  # the GUI answers with a JSON dict
+            resp = ApprovalResponse(
+                bool(resp.get("allow")),
+                str(resp.get("feedback", "")),
+                str(resp.get("remember_rule", "")),
+                str(resp.get("remember_scope", "project")),
+            )
+        return resp
 
 
 class PlanAsk:
@@ -101,35 +97,17 @@ class PlanAsk:
         self._n_stage = 0
 
     def confirm_plan(self, plan: Plan) -> Optional[Plan]:
-        self._n_plan += 1
-        req_id = f"plan-{self._n_plan}"
-        p = _Pending()
-        p.cancelled = self.server.cancelled
-        p.on_timeout = None  # cancellation == plan rejected
-        self.server.pending[req_id] = p
-        self.server.push_event("plan_review_requested", "planner", _jsonable(plan))
-        return self._wait(p)
+        req_id, p = self.server.question("plan", None)  # cancellation == plan rejected
+        self.server.push_event("plan_review_requested", "planner", dict(_jsonable(plan), req_id=req_id))
+        resp = self.server.wait(p)
+        if isinstance(resp, dict):  # the GUI answers with the (possibly edited) plan dict
+            return Plan.from_dict(resp)
+        return resp
 
     def confirm_stage(self, report: StageReport) -> str:
-        self._n_stage += 1
-        req_id = f"stage-{self._n_stage}"
-        p = _Pending()
-        p.cancelled = self.server.cancelled
-        p.on_timeout = "stop"
-        self.server.pending[req_id] = p
-        self.server.push_event("stage_confirm_requested", "planner", _jsonable(report))
-        return self._wait(p)
-
-    def _wait(self, p: _Pending) -> Any:
-        loop = self.server.loop
-        assert loop is not None
-        while not p.event.is_set():
-            try:
-                loop.run_coroutine_threadsafe(p.event.wait(), loop).result(timeout=0.2)
-            except (asyncio.TimeoutError, TimeoutError):
-                if p.cancelled():
-                    return p.on_timeout
-        return p.response
+        req_id, p = self.server.question("stage", "stop")
+        self.server.push_event("stage_confirm_requested", "planner", dict(_jsonable(report), req_id=req_id))
+        return self.server.wait(p)
 
 
 # ------------------------------------------------------------------- server
@@ -146,11 +124,12 @@ class Server:
         self.pending: dict[str, _Pending] = {}
         self._send_lock = asyncio.Lock()
         self._busy = False
+        self._counter = 0
         self._methods: dict[str, Callable[..., Any]] = self._register()
 
     # ------------------------------------------------------------- plumbing
     def _register(self) -> dict[str, Callable[..., Any]]:
-        m = {
+        return {
             "ping": lambda p: "pong",
             "open_project": self.open_project,
             "submit": self.submit,
@@ -169,7 +148,6 @@ class Server:
             "system_prompt": self.system_prompt,
             "answer": self.answer,
         }
-        return m
 
     @property
     def busy(self) -> bool:
@@ -194,10 +172,48 @@ class Server:
         payload = {"event": kind, "agent_id": agent_id, "data": _jsonable(data), "ts": time.time()}
         asyncio.run_coroutine_threadsafe(self.send(payload), self.loop)
 
+    def _on_bus_event(self, ev) -> None:
+        """EventBus subscriber (fn(ev)) -> push_event."""
+        self.push_event(ev.kind, ev.agent_id, ev.data)
+
+    def question(self, prefix: str, on_timeout: Any) -> tuple[str, _Pending]:
+        """Create a pending question from a worker thread (Event on the loop thread)."""
+        assert self.loop is not None
+        self._counter += 1
+        req_id = f"{prefix}-{self._counter}"
+        p = _Pending(self.loop)
+        p.on_timeout = on_timeout
+        self.pending[req_id] = p
+        return req_id, p
+
+    def wait(self, p: _Pending) -> Any:
+        """Block the calling worker thread until the GUI answers or the turn is cancelled."""
+        while not p.done.is_set():
+            try:
+                asyncio.run_coroutine_threadsafe(p.done.wait(), p.loop).result(timeout=0.2)
+            except (asyncio.TimeoutError, TimeoutError):
+                if self.cancelled():
+                    return p.on_timeout
+        return p.response
+
     def _require_engine(self) -> Engine:
         if self.engine is None:
             raise RuntimeError("no project open - call open_project first")
         return self.engine
+
+    def _start_turn(self, fn: Callable[[], None]) -> dict:
+        if self._busy:
+            raise RuntimeError("a turn is already running")
+        self._busy = True
+
+        def work() -> None:
+            try:
+                fn()
+            finally:
+                self._busy = False
+
+        threading.Thread(target=work, daemon=True).start()
+        return {"turn_id": self._require_engine().session.head}
 
     # -------------------------------------------------------------- methods
     def open_project(self, p: dict) -> dict:
@@ -209,13 +225,10 @@ class Server:
         self.bus = self.engine.bus
         self.approvals = ApprovalAsk(self)
         self.plans = PlanAsk(self)
-        self.engine.approver = self.engine.__class__.__mro__[0] and None  # placeholder, replaced below
-        # Engine wraps the approver with a serialising lock at construction;
-        # rebuild it here so parallel sub-agents are asked one at a time.
-        from .engine import _serialised
         self.engine.approver = _serialised(self.approvals.ask)
-        self.approvals.server = self
-        self.bus.subscribe(self.push_event_sub)
+        if self.provider_factory is not None:
+            self.engine._provider_override = self.provider_factory()
+        self.bus.subscribe(self._on_bus_event)
         self.root = root
         return {
             "root": str(root),
@@ -225,44 +238,18 @@ class Server:
             "config": _jsonable(cfg),
         }
 
-    def push_event_sub(self, ev) -> None:
-        self.push_event(ev.kind, ev.agent_id, ev.data)
-
     def submit(self, p: dict) -> dict:
         e = self._require_engine()
-        if self._busy:
-            raise RuntimeError("a turn is already running")
-        self._busy = True
         prompt, task_type = p.get("prompt", ""), p.get("task_type")
-
-        def work() -> None:
-            try:
-                e.submit(prompt, task_type)
-            finally:
-                self._busy = False
-
-        threading.Thread(target=work, daemon=True).start()
-        return {"turn_id": e.session.head}
+        return self._start_turn(lambda: e.submit(prompt, task_type))
 
     def submit_plan(self, p: dict) -> dict:
         e = self._require_engine()
-        if self._busy:
-            raise RuntimeError("a turn is already running")
-        self._busy = True
         goal = p.get("goal", "")
-
-        def work() -> None:
-            try:
-                e.submit_plan(goal, self.plans.confirm_plan, self.plans.confirm_stage)
-            finally:
-                self._busy = False
-
-        threading.Thread(target=work, daemon=True).start()
-        return {"turn_id": e.session.head}
+        return self._start_turn(lambda: e.submit_plan(goal, self.plans.confirm_plan, self.plans.confirm_stage))
 
     def cancel(self, p: dict) -> dict:
-        e = self._require_engine()
-        e.cancel()
+        self._require_engine().cancel()
         return {"ok": True}
 
     def rewind(self, p: dict) -> dict:
@@ -277,23 +264,13 @@ class Server:
         if self._busy:
             raise RuntimeError("a turn is already running")
         e.rewind(p["turn_id"], bool(p.get("keep_branch")))
-        self._busy = True
-
-        def work() -> None:
-            try:
-                e.submit(p["prompt"], p.get("task_type"))
-            finally:
-                self._busy = False
-
-        threading.Thread(target=work, daemon=True).start()
-        return {"turn_id": e.session.head}
+        return self._start_turn(lambda: e.submit(p["prompt"], p.get("task_type")))
 
     def new_session(self, p: dict) -> dict:
         e = self._require_engine()
         if self._busy:
             raise RuntimeError("a turn is running")
-        root = e.root
-        self.open_project({"root": str(root)})
+        self.open_project({"root": str(e.root)})
         return {"session_id": e.session.id}
 
     def open_session(self, p: dict) -> dict:
@@ -315,7 +292,6 @@ class Server:
         if self._busy:
             raise RuntimeError("a turn is running")
         data = p.get("config") or {}
-        # the project root is managed by the server, not by the GUI form
         data.setdefault("paths", {})["project_root"] = str(e.root)
         cfg = AppConfig.model_validate(data)
         persisted = cfg.model_copy(deep=True)
@@ -348,8 +324,7 @@ class Server:
 
     def system_prompt(self, p: dict) -> dict:
         e = self._require_engine()
-        name = p.get("task_type") or "general"
-        tt = e.task_types.get(name)
+        tt = e.task_types.get(p.get("task_type") or "general")
         return {"text": PromptBuilder(e.root, e.task_types, PromptSections()).build(tt)}
 
     def answer(self, p: dict) -> dict:
@@ -358,25 +333,23 @@ class Server:
         if pend is None:
             raise RuntimeError(f"no pending request {req_id!r}")
         pend.response = p.get("response")
-        if pend.event.get_loop() is not self.loop:
-            pend.event = asyncio.Event()  # pragma: no cover - defensive
-        pend.event.set()
+        pend.loop.call_soon_threadsafe(pend.done.set)
         self.pending.pop(req_id, None)
         return {"ok": True}
 
     # ------------------------------------------------------------- lifecycle
     async def attach(self, ws) -> None:
-        self.ws = ws
         self.loop = asyncio.get_running_loop()
+        self.ws = ws
 
     async def detach(self) -> None:
         self.ws = None
         # answer every pending question with its cancel value so workers unblock
-        for req_id, pend in list(self.pending.items()):
+        for pend in list(self.pending.values()):
             pend.response = pend.on_timeout
-            pend.event.set()
-            self.pending.pop(req_id, None)
-        if self.engine and self.bus:
+            pend.done.set()
+        self.pending.clear()
+        if self.engine is not None:
             self.engine.cancel()
 
 
@@ -411,20 +384,10 @@ def run(argv: list[str], provider_factory: ProviderFactory = None) -> int:
 
     async def _run() -> None:
         server = Server(Path(args.root) if args.root else None, provider_factory)
-        # the Engine created in open_project must use the injected provider
-        if provider_factory is not None:
-            orig_open = server.open_project
-
-            def open_with_provider(p: dict) -> dict:
-                r = orig_open(p)
-                server.engine._provider_override = provider_factory()
-                return r
-
-            server._methods["open_project"] = open_with_provider
-        async with websockets.serve(lambda ws: handler(ws, server), "127.0.0.1", 0):
-            port = server.loop.sockets[0].getsockname()[1]
-            print(f"WS_URL=ws://127.0.0.1:{port}", flush=True)
-            await asyncio.Future()  # run forever
+        server = await websockets.serve(lambda ws, *args: handler(ws, server), "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        print(f"WS_URL=ws://127.0.0.1:{port}", flush=True)
+        await asyncio.Future()  # run forever
 
     try:
         asyncio.run(_run())
