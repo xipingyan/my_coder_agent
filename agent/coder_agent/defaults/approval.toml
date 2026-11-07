@@ -17,7 +17,10 @@ auto_approve_all = false   # true: run everything not denied without asking (use
 
 [paths]
 auto_approve = true        # false: ask again for everything that is not explicitly allowed below
-trusted = ["/tmp"]         # directories besides the project root; add your own, e.g. "~/scratch"
+trusted = ["/tmp",
+    /home/xiping/mygitee/my_coder_agent/agent_cpp/,
+    /home/xiping/mygitee/my_coder_agent/agent_ts_gui
+    ]         # directories besides the project root; add your own, e.g. "~/scratch"
 
 [commands]
 default = "ask"            # ask | deny
