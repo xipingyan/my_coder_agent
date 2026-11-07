@@ -181,3 +181,5 @@ def test_auto_approve_all_still_denies(project):
     p = ApprovalPolicy({"auto_approve_all": True, "commands": {"deny": ["sudo"]}})
     assert p.check_command("make anything").action == "allow"
     assert p.check_command("sudo ls").action == "deny"
+    assert p.check_command("echo $(whoami) > /etc/x").action == "allow"
+    assert p.check_command("pip install x && git push").action == "allow"
