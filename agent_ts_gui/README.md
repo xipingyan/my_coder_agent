@@ -42,9 +42,9 @@ cd gui && npm install
 ## Status (phased build)
 
 - [x] **Phase 0** — scaffold: Electron+TS app, Python backend subprocess, WS handshake
-- [ ] **Phase 1** — backend WebSocket RPC + event protocol
-- [ ] **Phase 2** — main window layout + live event rendering
-- [ ] **Phase 3** — sessions, turns, rewind / edit-and-rerun
+- [x] **Phase 1** — backend WebSocket RPC + event protocol
+- [x] **Phase 2** — main window layout + live event rendering
+- [x] **Phase 3** — sessions, turns, rewind / edit-and-rerun
 - [ ] **Phase 4** — dialogs (approval, plan review, stage confirm, edit prompt)
 - [ ] **Phase 5** — settings (model / context / task prompts / approval)
 - [ ] **Phase 6** — polish, Chinese-input check, docs
