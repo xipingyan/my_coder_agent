@@ -124,6 +124,10 @@ async function createWindowAsync(root: string | null) {
       nodeIntegration: false,
     },
   });
+  // load the page immediately: the window must not sit blank while the
+  // Python backend starts (it takes a few seconds). The renderer shows a
+  // "Starting backend..." state and waits for the "backend-url" event.
+  window.loadFile(path.join(__dirname, "../renderer/index.html"));
   let startRoot = root;
   if (!startRoot) {
     const p = lastProjectFile();
@@ -137,13 +141,11 @@ async function createWindowAsync(root: string | null) {
     url = await startBackend(startRoot);
   } catch (e) {
     window.webContents.send("backend-exit", null);
-    window.loadFile(path.join(__dirname, "../renderer/index.html"));
     return;
   }
   backendUrl = url;
   backendRoot = startRoot;
   console.log("[main] backend ready:", url);
-  window.loadFile(path.join(__dirname, "../renderer/index.html"));
   await connectWs(url).catch((e) => console.error("[main] ws connect failed:", e));
   window.webContents.send("backend-url", url);
 }

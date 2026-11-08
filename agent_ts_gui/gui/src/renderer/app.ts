@@ -52,6 +52,7 @@ const planView = $("tab-plan");
 // ------------------------------------------------------------------- state
 const S = {
   root: null as string | null,
+  pendingRoot: null as string | null, // project picked while the backend was not ready
   taskTypes: [] as string[],
   effort: "medium",
   mode: 0, // 0 = single agent, 1 = plan & subtasks
@@ -65,6 +66,7 @@ const S = {
   stateSince: 0,
   thinkChars: 0,
   block: null as string | null,
+  blockFirst: false,
   pendingDocs: new Map<string, string>(),
   planDict: null as Record<string, any> | null,
 };
@@ -247,7 +249,7 @@ function renderTurn(t: { prompt: string; task_type: string; messages: any[]; sta
     if (m.role === "assistant") {
       if (m.content) {
         chat.line("\nAssistant", "c-ok b");
-        chat.line(m.content);
+        chat.line(String(m.content).replace(/^\n+/, ""));
       }
       for (const tc of m.tool_calls ?? []) {
         let args: any = {};
@@ -903,8 +905,12 @@ function onEvent(ev: AgentEvent) {
       const who = ev.agent_id === "main" ? "" : ` (${ev.agent_id})`;
       chat.line(`\nAssistant${who}`, "c-ok b");
       S.block = ev.agent_id;
+      S.blockFirst = true;
     }
-    chat.write(d.text);
+    // the header line already ends with a newline; drop the leading newlines
+    // of the first content chunk so there is no double blank line
+    chat.write(S.blockFirst ? (d.text ?? "").replace(/^\n+/, "") : d.text);
+    S.blockFirst = false;
   } else if (k === "tool_call") {
     chatTool(d.name, d.args ?? {}, ev.agent_id);
     log(ev, `${d.name} ${argsSummary(d.name, d.args ?? {})}`, "c-tool");
@@ -1124,7 +1130,14 @@ $("sp-btn").addEventListener("click", async () => {
 async function chooseProject() {
   if (S.busy) return;
   const dir = await window.api.pickDirectory();
-  if (dir) openProject(dir);
+  if (!dir) return;
+  if (!bootDone) {
+    // backend not ready yet: queue it, boot / the backend-url listener opens it
+    S.pendingRoot = dir;
+    chat.line(`\nProject queued: ${dir} (will open when the backend is ready)`, "c-muted");
+    return;
+  }
+  openProject(dir);
 }
 
 $("root-label").style.cursor = "pointer";
@@ -1266,38 +1279,74 @@ let backendDown = false;
 function showBackendBanner(code: number | null) {
   backendDown = true;
   setBusy(false);
+  if (document.getElementById("backend-banner")) return; // never stack two banners
   const bar = document.createElement("div");
   bar.id = "backend-banner";
   bar.innerHTML = `Backend process exited (code=${code}). <button class="primary restart">Restart backend</button>`;
   bar.querySelector(".restart")!.addEventListener("click", async () => {
-    bar.textContent = "Restarting backend...";
-    bar.style.opacity = "0.6";
+    // remove the banner first: while the restart is in flight the main process
+    // sends "backend-url", and the onBackendUrl listener must not race with us
+    bar.remove();
+    backendDown = false;
     try {
       await window.api.restartBackend(S.root);
     } catch (e) {
       showBackendBanner(null);
       return;
     }
-    if (S.root) await openProject(S.root);
+    const r = S.root || S.pendingRoot;
+    S.pendingRoot = null;
+    if (r) await openProject(r);
   });
   document.body.appendChild(bar);
 }
 
+let bootDone = false; // boot() owns backend-exit handling until it finishes
 window.api.onBackendExit((code) => {
-  if (backendDown) return;
+  if (backendDown || !bootDone) return;
   chat.line(`\n[backend exited (code=${code})]`, "c-error");
   showBackendBanner(code);
 });
 
+// if the backend (re)connects while the banner is up (e.g. it was a false
+// alarm from the boot timeout), dismiss it and open the project again
+window.api.onBackendUrl(() => {
+  if (!backendDown) return;
+  backendDown = false;
+  const banner = document.getElementById("backend-banner");
+  if (banner) banner.remove();
+  const r = S.root || S.pendingRoot;
+  S.pendingRoot = null;
+  if (r) openProject(r);
+});
+
 (async function boot() {
-  // if the backend failed to start at boot, show the restart banner immediately
-  if (!(await window.api.getBackendUrl())) {
+  // from here on, backend-exit / backend-url are handled by the global
+  // listeners (banner etc.), so bootDone is set before the first await
+  bootDone = true;
+  $("state-label").textContent = "Starting backend...";
+  // the page loads before the Python backend is up: wait for the "backend-url"
+  // event (or the "backend-exit" / timeout if it failed to start).
+  const url = await new Promise<string | null>((resolve) => {
+    let done = false;
+    const finish = (u: string | null) => { if (!done) { done = true; resolve(u); } };
+    window.api.onBackendUrl(finish);
+    window.api.onBackendExit(() => finish(null));
+    setTimeout(() => finish(null), 35000); // slightly past main's 30s start timeout
+    // snapshot: covers the case where the backend was already ready and the
+    // event was sent before this listener was registered
+    window.api.getBackendUrl().then((u) => u && finish(u));
+  });
+  if (!url) {
     showBackendBanner(null);
+    $("state-label").textContent = "Backend not running";
     return;
   }
-  const root = (await window.api.getBackendRoot()) || (await window.api.getLastProject());
-  if (root) await openProject(root);
-  else {
+  const root = (await window.api.getBackendRoot()) || (await window.api.getLastProject()) || S.pendingRoot;
+  S.pendingRoot = null;
+  if (root) {
+    await openProject(root);
+  } else {
     chat.line("No project open yet. Click the project label above to choose one.", "c-muted");
     $("state-label").textContent = "No project";
   }
