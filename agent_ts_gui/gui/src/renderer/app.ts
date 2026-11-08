@@ -1131,11 +1131,15 @@ $("root-label").title = "Click to open a different project";
 $("root-label").addEventListener("click", chooseProject);
 
 // ------------------------------------------------------- resizable splitters
-const SPLIT_DEFAULTS = { left: 260, right: 520 };
-const SPLIT_LIMITS = { left: [180, 600] as const, right: [260, 1000] as const };
+const SPLIT_DEFAULTS = { left: 260, right: 520, input: 130 };
+const SPLIT_LIMITS = {
+  left: [180, 600] as const,
+  right: [260, 1000] as const,
+  input: [80, 400] as const,
+};
 const SPLIT_STORE = "coder-agent-panel-widths";
 
-function loadSplitSizes(): { left?: number; right?: number } {
+function loadSplitSizes(): { left?: number; right?: number; input?: number } {
   try {
     const raw = localStorage.getItem(SPLIT_STORE);
     return raw ? JSON.parse(raw) : {};
@@ -1148,12 +1152,14 @@ function saveSplitSizes() {
   const sizes = {
     left: Math.round($("left").getBoundingClientRect().width),
     right: Math.round($("right").getBoundingClientRect().width),
+    input: Math.round($("input-zone").getBoundingClientRect().height),
   };
   try { localStorage.setItem(SPLIT_STORE, JSON.stringify(sizes)); } catch { /* ignore */ }
 }
 
 function setSplitLeft(w: number) { ($("left") as HTMLElement).style.width = `${w}px`; }
 function setSplitRight(w: number) { ($("right") as HTMLElement).style.width = `${w}px`; }
+function setSplitInput(h: number) { ($("input-zone") as HTMLElement).style.height = `${h}px`; }
 
 function initSplitter(splitId: "split-left" | "split-right") {
   const splitter = $(splitId);
@@ -1166,21 +1172,25 @@ function initSplitter(splitId: "split-left" | "split-right") {
     e.preventDefault();
     splitter.classList.add("dragging");
     document.body.classList.add("resizing");
+    // where inside the handle the mouse grabbed it, so the pane does not
+    // jump on the first move
+    const grab = e.clientX - (splitter.getBoundingClientRect().left + 2);
 
     const onMove = (ev: MouseEvent) => {
-      // position the pane absolutely from the cursor so the handle's center
-      // sits exactly under the cursor (no offset from where the mouse
-      // grabbed the handle, no transform drift):
-      //   4px body padding + 2px splitter margin + 2px half splitter width
+      // position the pane absolutely from the cursor: the handle's center
+      // stays at (cursor - grab) at all times.
+      //   4px body padding + 2px splitter margin + 2px half splitter width = 8px
+      // (w is the border-box width, so the pane border is already inside it)
       const bodyRect = body.getBoundingClientRect();
       let w = isLeft
-        ? ev.clientX - bodyRect.left - 8
-        : bodyRect.right - ev.clientX - 8;
-      // clamp: within limits and leave at least 120px for the middle pane
-      const room = bodyRect.width - 8 - 8 - 120; // padding + splitters + mid min
+        ? ev.clientX - grab - bodyRect.left - 8
+        : bodyRect.right - (ev.clientX - grab) - 8;
+      // clamp: within limits and leave at least 120px for the middle pane.
+      // non-mid space = 2x padding(4) + 4x margins(2) + 2x splitters(4) = 24
+      const room = bodyRect.width - 24 - 120;
       const otherW = isLeft
-        ? ($("right") as HTMLElement).getBoundingClientRect().width
-        : ($("left") as HTMLElement).getBoundingClientRect().width;
+        ? ($("right") as HTMLElement).offsetWidth
+        : ($("left") as HTMLElement).offsetWidth;
       const maxByMid = Math.max(limits[0], room - otherW);
       w = Math.min(Math.max(w, limits[0]), maxByMid, limits[1]);
       if (isLeft) setSplitLeft(w); else setSplitRight(w);
@@ -1203,11 +1213,51 @@ function initSplitter(splitId: "split-left" | "split-right") {
   });
 }
 
+function initInputSplitter() {
+  const splitter = $("split-input");
+  const mid = $("mid");
+  const zone = $("input-zone");
+  const limits = SPLIT_LIMITS.input;
+
+  splitter.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    splitter.classList.add("dragging");
+    document.body.classList.add("resizing-h");
+    const grab = e.clientY - (splitter.getBoundingClientRect().top + 2);
+
+    const onMove = (ev: MouseEvent) => {
+      // zone height from the cursor: the handle center is 2px (zone margin)
+      // + 2px (half splitter) above the zone top
+      const midRect = mid.getBoundingClientRect();
+      let h = midRect.bottom - (ev.clientY - grab) - 4;
+      h = Math.min(Math.max(h, limits[0]), limits[1]);
+      setSplitInput(h);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      splitter.classList.remove("dragging");
+      document.body.classList.remove("resizing-h");
+      saveSplitSizes();
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+
+  splitter.addEventListener("dblclick", () => {
+    setSplitInput(SPLIT_DEFAULTS.input);
+    saveSplitSizes();
+  });
+}
+
 const savedSplits = loadSplitSizes();
 if (savedSplits.left) setSplitLeft(savedSplits.left);
 if (savedSplits.right) setSplitRight(savedSplits.right);
+if (savedSplits.input) setSplitInput(savedSplits.input);
 initSplitter("split-left");
 initSplitter("split-right");
+initInputSplitter();
 
 // ------------------------------------------------------------------- boot
 let backendDown = false;

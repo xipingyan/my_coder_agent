@@ -67,10 +67,18 @@ button.flat:hover { background: #e8f0fb; }
   border-radius: 2px;
   background: transparent;
 }
+.splitter.h {
+  width: auto;
+  height: 4px;
+  margin: 2px 0;
+  cursor: row-resize;
+}
 .splitter:hover, .splitter.dragging { background: #b9d3ee; }
 /* while dragging: disable selection and text cursors globally */
 body.resizing { cursor: col-resize !important; user-select: none; }
 body.resizing * { cursor: col-resize !important; }
+body.resizing-h { cursor: row-resize !important; user-select: none; }
+body.resizing-h * { cursor: row-resize !important; }
 
 /* tabs */
 #left-tabs, #right-tabs { display: flex; border-bottom: 1px solid var(--border); }
@@ -115,9 +123,16 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
   word-break: break-word;
   line-height: 1.45;
 }
+#input-zone {
+  height: 130px;
+  min-height: 80px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
 #input {
-  height: 110px;
-  margin: 4px 0 0 0;
+  flex: 1;
+  min-height: 0;
   resize: none;
   padding: 8px;
 }

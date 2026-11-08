@@ -41,10 +41,13 @@
 
     <div id="mid">
       <div id="chat" class="log"></div>
-      <textarea id="input" placeholder="Describe the task...  (Ctrl+Enter to send)"></textarea>
-      <div id="send-row">
-        <span class="flex1"></span>
-        <button id="send-btn">Send (Ctrl+Enter)</button>
+      <div class="splitter h" id="split-input" title="Drag to resize, double-click to reset"></div>
+      <div id="input-zone">
+        <textarea id="input" placeholder="Describe the task...  (Ctrl+Enter to send)"></textarea>
+        <div id="send-row">
+          <span class="flex1"></span>
+          <button id="send-btn">Send (Ctrl+Enter)</button>
+        </div>
       </div>
     </div>
 
