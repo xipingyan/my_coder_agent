@@ -59,6 +59,7 @@ const S = {
   ctxMax: 131072,
   compressThreshold: 0.95,
   compressTarget: 0.5,
+  config: null as Record<string, any> | null,
   state: "idle",
   stateDetail: "",
   stateSince: 0,
@@ -192,6 +193,7 @@ async function openProject(root: string, sessionId: string | null = null) {
   S.ctxMax = r.config?.context?.max_tokens ?? S.ctxMax;
   S.compressThreshold = r.config?.context?.compress_threshold ?? 0.95;
   S.compressTarget = r.config?.context?.compress_target ?? 0.5;
+  S.config = r.config;
   $("root-label").textContent = ` Project: ${r.root} `;
   $("root-label").title = r.root;
   document.title = `Coder Agent - ${r.root.split(/[\\/]/).pop()}`;
@@ -528,6 +530,254 @@ function planDialog(plan: Record<string, any>, typeNames: string[]): Promise<Rec
   });
 }
 
+// ------------------------------------------------------------- settings
+const SETTINGS_TIPS: Record<string, string> = {
+  effort: "reasoning_effort sent to the server ('default' = send nothing)",
+  send_effort: "Send the reasoning_effort request field",
+  enable_thinking: "chat_template_kwargs.enable_thinking (blank = server default)",
+  token_budget: "thinking_token_budget (vLLM). 0/blank = unset",
+  max_think_chars: "Abort thinking and retry without it if it exceeds this many chars. 0 = unlimited",
+  extra_body: "JSON merged into the request body, e.g. {\"top_k\": 20}",
+  max_tokens: "Server-side context length (cache size). Compression is based on this.",
+  compress_threshold: "Compress when usage reaches this fraction (0.95 = 95%)",
+  compress_target: "Compress down to this fraction",
+  parallelism: "Concurrent sub-agents. Keep 1 for a single-GPU Ollama.",
+  bypass_proxy: "Ignore HTTP(S)_PROXY environment variables (LAN server)",
+  planner_thinking: "Allow thinking while planning (slower)",
+  doc_analysis: "Summarise relevant MODULE.md files before each subtask",
+  confirm_each_stage: "Ask for confirmation after every stage",
+};
+
+async function settingsDialog(): Promise<boolean> {
+  const strategiesR = await call("context_strategies");
+  const strategies: string[] = (strategiesR && !strategiesR.__error) ? strategiesR.strategies : ["summarize", "truncate"];
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.className = "modal wide";
+    modal.innerHTML =
+      `<div class="head">Settings</div>` +
+      `<div class="settings">` +
+      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button></div>` +
+      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div></div>` +
+      `</div>` +
+      `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
+
+    const cfg = JSON.parse(JSON.stringify(S.config ?? {}));
+    const choices: Record<string, string[]> = {
+      provider: ["openai_compat", "ollama"],
+      algorithm: strategies,
+    };
+    const skip = new Set(["project_root"]);
+    const dirtyPrompts = new Map<string, string>();
+
+    function fieldHtml(sec: string, key: string, val: any): string {
+      if (skip.has(key)) return "";
+      const tip = SETTINGS_TIPS[key] ? `<span class="tip">${SETTINGS_TIPS[key]}</span>` : "";
+      const label = `<span class="lbl">${key}${tip}</span>`;
+      const opts = choices[key];
+      if (opts) {
+        return `<div class="field">${label}<select data-s="${sec}" data-k="${key}">` +
+          opts.map((o) => `<option${o === val ? " selected" : ""}>${o}</option>`).join("") + `</select></div>`;
+      }
+      if (typeof val === "boolean") {
+        return `<div class="field">${label}<input type="checkbox" data-s="${sec}" data-k="${key}"${val ? " checked" : ""}/></div>`;
+      }
+      if (val === null || val === undefined) {
+        return `<div class="field">${label}<input type="text" data-s="${sec}" data-k="${key}" data-null="1" value=""/></div>`;
+      }
+      if (typeof val === "number") {
+        return `<div class="field">${label}<input type="number" step="any" data-s="${sec}" data-k="${key}" value="${val}"/></div>`;
+      }
+      if (typeof val === "object") {
+        // extra_body (dict) / prompt_dirs (list)
+        const text = Array.isArray(val) ? val.join(", ") : JSON.stringify(val);
+        return `<div class="field">${label}<input type="text" data-s="${sec}" data-k="${key}" data-obj="1" value="${esc(text)}"/></div>`;
+      }
+      return `<div class="field">${label}<input type="text" data-s="${sec}" data-k="${key}" value="${esc(String(val))}"/></div>`;
+    }
+
+    function group(sec: string, title: string): string {
+      const body = Object.entries(cfg[sec] ?? {}).map(([k, v]) => fieldHtml(sec, k, v)).join("");
+      return `<fieldset class="grp"><legend>${title}</legend>${body}</fieldset>`;
+    }
+
+    const modelPage = modal.querySelector<HTMLElement>('.page[data-p="model"]')!;
+    modelPage.innerHTML =
+      group("server", "Server") +
+      `<div class="btnrow"><button class="test">Test connection / list models</button></div>` +
+      `<div class="msg"></div>` +
+      group("thinking", "Thinking") +
+      group("sampling", "Sampling");
+
+    const ctxPage = modal.querySelector<HTMLElement>('.page[data-p="context"]')!;
+    ctxPage.innerHTML =
+      group("context", "Context / compression") +
+      `<div class="btnrow"><button class="detect">Detect server context length and use it for max_tokens</button></div>` +
+      `<div class="msg"></div>` +
+      group("agent", "Agent") +
+      group("orchestrator", "Subtask planning") +
+      group("paths", "Paths");
+
+    // ---- prompts tab
+    const pPage = modal.querySelector<HTMLElement>('.page[data-p="prompts"]')!;
+    pPage.innerHTML =
+      `<div class="toprow"><select class="ptype"></select><button class="pnew">New type...</button><button class="prevert">Revert to default</button></div>` +
+      `<textarea class="code"></textarea>` +
+      `<div class="tip" style="font-size:11px;color:#888;margin-top:6px">Front-matter keys: name, description, keywords, globs, effort, tools. Saved to the user prompts folder; a project can override in &lt;project&gt;/.agent/prompts/.</div>`;
+    const pType = pPage.querySelector(".ptype") as HTMLSelectElement;
+    const pEdit = pPage.querySelector("textarea") as HTMLTextAreaElement;
+    let pCurrent: string | null = null;
+
+    async function pSwitch(name: string) {
+      if (pCurrent && pEdit.value !== (dirtyPrompts.get(pCurrent) ?? (await pText(pCurrent)))) dirtyPrompts.set(pCurrent, pEdit.value);
+      pCurrent = name;
+      pEdit.value = dirtyPrompts.get(name) ?? (await pText(name));
+    }
+    async function pText(name: string): Promise<string> {
+      const r = await call("prompt_source", { name });
+      return r && r.__error ? "" : r.text;
+    }
+    async function pLoad() {
+      const names = ["base", ...S.taskTypes];
+      pType.innerHTML = names.map((n) => `<option>${esc(n)}</option>`).join("");
+      await pSwitch(names[0]);
+    }
+    pType.addEventListener("change", () => void pSwitch(pType.value));
+    pPage.querySelector(".pnew")!.addEventListener("click", async () => {
+      const name = window.prompt("New task type name (letters, digits, _):");
+      if (!name || !/^[A-Za-z0-9_]+$/.test(name)) return;
+      if (!dirtyPrompts.has(name)) {
+        dirtyPrompts.set(name, `---\nname: ${name}\ndescription: \nkeywords: \nglobs: \neffort: medium\n---\nTask type: ${name}.\n`);
+      }
+      if (![...pType.options].some((o) => o.value === name)) pType.add(new Option(name, name));
+      pType.value = name;
+      await pSwitch(name);
+    });
+    pPage.querySelector(".prevert")!.addEventListener("click", async () => {
+      if (!pCurrent) return;
+      dirtyPrompts.delete(pCurrent);
+      await call("revert_prompt", { name: pCurrent });
+      pEdit.value = await pText(pCurrent);
+    });
+    void pLoad();
+
+    // ---- approval tab
+    const aPage = modal.querySelector<HTMLElement>('.page[data-p="approval"]')!;
+    aPage.innerHTML = `<div class="apath" style="font-size:12px;color:#555;margin-bottom:6px"></div><textarea class="code"></textarea>`;
+    const aEdit = aPage.querySelector("textarea") as HTMLTextAreaElement;
+    let approvalText = "";
+    void (async () => {
+      const r = await call("approval_policy");
+      if (r && r.__error) return;
+      approvalText = r.text;
+      aEdit.value = r.text;
+      aPage.querySelector(".apath")!.textContent = `User-wide approval policy: ${r.path} (projects can add rules in <project>/.agent/approval.toml)`;
+    })();
+
+    // ---- tabs
+    modal.querySelectorAll(".settings .tabs button").forEach((b) => {
+      b.addEventListener("click", () => {
+        modal.querySelectorAll(".settings .tabs button").forEach((x) => x.classList.remove("active"));
+        (b as HTMLElement).classList.add("active");
+        const name = (b as HTMLElement).dataset.p!;
+        modal.querySelectorAll(".settings .page").forEach((pg) => pg.classList.toggle("active", (pg as HTMLElement).dataset.p === name));
+      });
+    });
+
+    // ---- collect / save
+    function collect(): Record<string, any> {
+      const out: Record<string, any> = JSON.parse(JSON.stringify(cfg));
+      modal.querySelectorAll<HTMLElement>("[data-s]").forEach((el) => {
+        const anyEl = el as HTMLInputElement & HTMLSelectElement;
+        const sec = anyEl.dataset.s!, k = anyEl.dataset.k!;
+        let v: any;
+        if ((anyEl as HTMLInputElement).type === "checkbox") v = (anyEl as HTMLInputElement).checked;
+        else if (anyEl.dataset.obj === "1") {
+          const t = (anyEl as HTMLInputElement).value.trim();
+          const base = cfg[sec]?.[k];
+          if (!t) v = Array.isArray(base) ? [] : {};
+          else if (Array.isArray(base)) v = t.split(",").map((x) => x.trim()).filter(Boolean);
+          else v = JSON.parse(t);
+        } else if (anyEl.dataset.null === "1") {
+          const t = (anyEl as HTMLInputElement).value.trim();
+          if (!t) v = null;
+          else if (!isNaN(Number(t))) v = Number(t);
+          else v = t;
+        } else if (typeof cfg[sec]?.[k] === "number") {
+          const t = (anyEl as HTMLInputElement).value.trim();
+          v = t === "" ? cfg[sec][k] : Number(t);
+        } else v = (anyEl as HTMLInputElement).value;
+        out[sec] = out[sec] ?? {};
+        out[sec][k] = v;
+      });
+      return out;
+    }
+
+    function showMsg(page: HTMLElement, ok: boolean, text: string) {
+      const m = page.querySelector(".msg") as HTMLElement;
+      m.className = "msg " + (ok ? "ok" : "err");
+      m.textContent = text;
+    }
+
+    modelPage.querySelector(".test")!.addEventListener("click", async () => {
+      const m = modelPage.querySelector(".msg") as HTMLElement;
+      m.className = "msg"; m.textContent = "Testing...";
+      const r = await call("test_connection", { config: collect() });
+      if (r && r.__error) { showMsg(modelPage, false, String(r.__error)); return; }
+      showMsg(modelPage, true, `Models:\n${(r.models ?? []).join("\n")}\n\n${r.context_text ?? ""}`);
+    });
+    ctxPage.querySelector(".detect")!.addEventListener("click", async () => {
+      const m = ctxPage.querySelector(".msg") as HTMLElement;
+      m.className = "msg"; m.textContent = "Detecting...";
+      const r = await call("test_connection", { config: collect() });
+      if (r && r.__error) { showMsg(ctxPage, false, String(r.__error)); return; }
+      const info = r.context ?? {};
+      if (info.loaded) {
+        cfg.context.max_tokens = info.loaded;
+        const inp = ctxPage.querySelector('[data-s="context"][data-k="max_tokens"]') as HTMLInputElement;
+        inp.value = String(info.loaded);
+        showMsg(ctxPage, true, `${r.context_text ?? ""}\n\ncontext.max_tokens set to ${info.loaded.toLocaleString()}.`);
+      } else {
+        showMsg(ctxPage, false, r.context_text ?? "could not detect server context length");
+      }
+    });
+
+    $("modal-backdrop").classList.add("show");
+    const done = (saved: boolean) => { $("modal-backdrop").classList.remove("show"); resolve(saved); };
+    modal.querySelector(".no")!.addEventListener("click", () => done(false));
+    modal.querySelector(".yes")!.addEventListener("click", async () => {
+      // stash the prompt editor
+      if (pCurrent) dirtyPrompts.set(pCurrent, pEdit.value);
+      const btn = modal.querySelector(".yes") as HTMLButtonElement;
+      btn.disabled = true;
+      try {
+        const r = await call("save_config", { config: collect() });
+        if (r && r.__error) throw new Error(String(r.__error));
+        for (const [name, text] of dirtyPrompts) await call("save_prompt", { name, text });
+        if (aEdit.value !== approvalText) {
+          const ar = await call("save_approval_policy", { text: aEdit.value });
+          if (ar && ar.__error) throw new Error("approval policy: " + ar.__error);
+        }
+        S.config = collect();
+        S.taskTypes = r.task_types ?? S.taskTypes;
+        S.effort = S.config.thinking?.effort ?? S.effort;
+        S.ctxMax = S.config.context?.max_tokens ?? S.ctxMax;
+        S.compressThreshold = S.config.context?.compress_threshold ?? 0.95;
+        S.compressTarget = S.config.context?.compress_target ?? 0.5;
+        ($("effort-combo") as HTMLSelectElement).value = S.effort;
+        reloadTaskTypes();
+        setCtxBar(0, S.ctxMax, false);
+        refreshContextEstimate();
+        refreshServerInfo();
+        done(true);
+      } catch (e: any) {
+        showMsg(modelPage, false, String(e?.message ?? e));
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ------------------------------------------------- turn actions (rewind / edit)
 async function impactText(turnId: string): Promise<string> {
   const r = await call("rewind_impact", { turn_id: turnId });
@@ -838,7 +1088,24 @@ $("new-session-btn").addEventListener("click", async () => {
   switchLeftTab("turns");
 });
 $("settings-btn").addEventListener("click", () => {
-  chat.line("\n[settings panel coming in Phase 5]", "c-muted");
+  if (S.busy) { chat.line("\n[settings disabled while a turn is running]", "c-muted"); return; }
+  void settingsDialog().then((saved) => { if (saved) chat.line("\n[settings saved]", "c-ok"); });
+});
+$("sp-btn").addEventListener("click", async () => {
+  const task = ($("task-combo") as HTMLSelectElement).value;
+  const taskType = task === "(auto)" ? "general" : task;
+  const r = await call("system_prompt", { task_type: taskType });
+  if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
+  // read-only modal
+  const modal = $("modal");
+  modal.className = "modal wide";
+  modal.innerHTML =
+    `<div class="head">System prompt (${esc(taskType)})</div>` +
+    `<div class="body"><pre class="diff" style="max-height:60vh"></pre></div>` +
+    `<div class="foot"><button class="primary yes">Close</button></div>`;
+  modal.querySelector("pre")!.textContent = r.text;
+  $("modal-backdrop").classList.add("show");
+  modal.querySelector(".yes")!.addEventListener("click", () => $("modal-backdrop").classList.remove("show"));
 });
 
 async function chooseProject() {

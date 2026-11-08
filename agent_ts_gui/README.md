@@ -46,5 +46,5 @@ cd gui && npm install
 - [x] **Phase 2** — main window layout + live event rendering
 - [x] **Phase 3** — sessions, turns, rewind / edit-and-rerun
 - [x] **Phase 4** — dialogs (approval, plan review, stage confirm, edit prompt)
-- [ ] **Phase 5** — settings (model / context / task prompts / approval)
+- [x] **Phase 5** — settings (model / context / task prompts / approval)
 - [ ] **Phase 6** — polish, Chinese-input check, docs

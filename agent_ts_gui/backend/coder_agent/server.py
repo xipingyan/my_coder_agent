@@ -22,9 +22,11 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import re
 import sys
 import threading
 import time
+from importlib import resources
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -32,6 +34,7 @@ import websockets
 
 from .approval import ApprovalRequest, ApprovalResponse
 from .config import AppConfig, load_config, save_config
+from .context.compression import available_strategies
 from .engine import Engine, _serialised
 from .events import EventBus
 from .llm import LLMProvider, create_provider, fetch_context_info
@@ -155,6 +158,12 @@ class Server:
             "session_summaries": self.session_summaries,
             "session_detail": self.session_detail,
             "rewind_impact": self.rewind_impact,
+            "prompt_source": self.prompt_source,
+            "save_prompt": self.save_prompt,
+            "revert_prompt": self.revert_prompt,
+            "approval_policy": self.approval_policy,
+            "save_approval_policy": self.save_approval_policy,
+            "context_strategies": self.context_strategies,
             "answer": self.answer,
         }
 
@@ -373,6 +382,57 @@ class Server:
                 "messages": _jsonable(t.display_messages()),
             })
         return {"turns": out}
+
+    # ------------------------------------------------------------ settings
+    def context_strategies(self, p: dict) -> dict:
+        return {"strategies": available_strategies()}
+
+    def prompt_source(self, p: dict) -> dict:
+        """Current text of a task-type prompt (user override if present, else built-in)."""
+        from .paths import user_dir
+        name = p["name"]
+        user_file = user_dir() / "prompts" / f"{name}.md"
+        if user_file.is_file():
+            return {"name": name, "text": user_file.read_text(encoding="utf-8"), "source": "user"}
+        pkg = resources.files("coder_agent").joinpath("prompts/defaults") / f"{name}.md"
+        return {"name": name, "text": pkg.read_text(encoding="utf-8"), "source": "builtin"}
+
+    def save_prompt(self, p: dict) -> dict:
+        from .paths import user_dir
+        name = p["name"]
+        if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+            raise RuntimeError("invalid task type name")
+        d = user_dir() / "prompts"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.md").write_text(p["text"], encoding="utf-8")
+        e = self._require_engine()
+        e.apply_config(e.config)  # reload the registry
+        return {"ok": True, "task_types": e.task_types.names()}
+
+    def revert_prompt(self, p: dict) -> dict:
+        from .paths import user_dir
+        f = user_dir() / "prompts" / f"{p['name']}.md"
+        f.unlink(missing_ok=True)
+        e = self._require_engine()
+        e.apply_config(e.config)
+        return {"ok": True, "task_types": e.task_types.names()}
+
+    def approval_policy(self, p: dict) -> dict:
+        from .approval import ensure_user_policy
+        path = ensure_user_policy()
+        return {"path": str(path), "text": path.read_text(encoding="utf-8")}
+
+    def save_approval_policy(self, p: dict) -> dict:
+        import tomllib
+        from .approval import ensure_user_policy
+        path = ensure_user_policy()
+        try:
+            tomllib.loads(p["text"])
+        except Exception as ex:
+            raise RuntimeError(f"invalid TOML: {ex}")
+        path.write_text(p["text"], encoding="utf-8")
+        self._require_engine().reload_policy()
+        return {"ok": True}
 
     def rewind_impact(self, p: dict) -> dict:
         """What would be discarded / restored if we rewound to before ``turn_id``."""
