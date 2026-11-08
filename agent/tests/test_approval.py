@@ -183,3 +183,7 @@ def test_auto_approve_all_still_denies(project):
     assert p.check_command("sudo ls").action == "deny"
     assert p.check_command("echo $(whoami) > /etc/x").action == "allow"
     assert p.check_command("pip install x && git push").action == "allow"
+
+    cmd_str = """cd /home/xiping/mygithub/my_coder_agent/agent_ts_gui/backend && .venv/bin/pip install -q pytest 2>&1 | tail -1; .venv/bin/python -m pytest tests/test_server.py -x -q 2>&1 | tail -25
+(cwd: .)"""
+    assert p.check_command(cmd_str).action == "allow"
