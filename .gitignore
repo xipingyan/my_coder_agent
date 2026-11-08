@@ -15,3 +15,5 @@ ollama_server.log
 ollama_server.pid
 tmp/
 EOF
+.agent
+hellowork
