@@ -6,25 +6,36 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import WebSocket from "ws";
 
-const BACKEND_DIR = path.resolve(__dirname, "../../../backend");
+// Backend location: in dev the repo's backend/ dir + its venv python; in a
+// packaged app a standalone PyInstaller bundle shipped in resources/backend.
+function backendInfo(): { cmd: string; args: string[]; cwd: string } {
+  if (app.isPackaged) {
+    const dir = path.join(process.resourcesPath, "backend");
+    const exe = process.platform === "win32" ? "coder-agent-server.exe" : "coder-agent-server";
+    return { cmd: path.join(dir, exe), args: [], cwd: dir };
+  }
+  const dir = path.resolve(__dirname, "../../../backend");
+  const venv = process.platform === "win32"
+    ? path.join(dir, ".venv", "Scripts", "python.exe")
+    : path.join(dir, ".venv", "bin", "python");
+  const py = fs.existsSync(venv) ? venv : (process.platform === "win32" ? "python" : "python3");
+  return { cmd: py, args: ["-m", "coder_agent.server"], cwd: dir };
+}
+
 let backend: ChildProcess | null = null;
 let backendUrl: string | null = null;
 let backendRoot: string | null = null;
 let window: BrowserWindow | null = null;
 let ws: WebSocket | null = null;
 
-function findPython(): string {
-  const venv = path.join(BACKEND_DIR, ".venv", "bin", "python");
-  return fs.existsSync(venv) ? venv : "python3";
-}
-
 // ------------------------------------------------------------- backend proc
 function startBackend(root: string | null): Promise<string> {
-  console.log("[main] starting backend, python =", findPython(), "root =", root);
+  const bi = backendInfo();
+  const args = [...bi.args];
+  if (root) args.push("--root", root);
+  console.log("[main] starting backend:", bi.cmd, "root =", root);
   return new Promise((resolve, reject) => {
-    const args = ["-m", "coder_agent.server"];
-    if (root) args.push("--root", root);
-    const proc = spawn(findPython(), args, { cwd: BACKEND_DIR, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(bi.cmd, args, { cwd: bi.cwd, stdio: ["pipe", "pipe", "pipe"] });
     backend = proc;
     let settled = false;
     const timer = setTimeout(() => {

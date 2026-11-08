@@ -1,21 +1,50 @@
 {
   "name": "coder-agent-gui",
+  "productName": "Coder Agent",
   "version": "0.1.0",
+  "author": "Coder Agent",
   "description": "Coder Agent GUI (Electron + TypeScript front-end, Python backend)",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "node build.mjs",
     "dev": "npm run build && electron --no-sandbox .",
-    "start": "npm run build && electron --no-sandbox ."
+    "start": "npm run build && electron --no-sandbox .",
+    "dist:linux": "npm run build && electron-builder --linux AppImage",
+    "dist:win": "npm run build && electron-builder --win nsis"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/ws": "^8.18.2",
     "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
     "esbuild": "^0.23.0",
     "typescript": "^5.5.0"
   },
   "dependencies": {
     "ws": "^8.22.1"
+  },
+  "build": {
+    "appId": "local.coderagent.gui",
+    "productName": "Coder Agent",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "build-resources/backend",
+        "to": "backend"
+      }
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Development"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

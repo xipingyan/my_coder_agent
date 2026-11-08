@@ -51,6 +51,72 @@ cd gui && npm install
       (backend is SIGTERM'd and the app waits for it before exiting), IME-safe
       Enter handling, fail-fast RPC when the backend is down, English UI
 
+## Release (installing on a third-party machine)
+
+The app is distributed as a single self-contained binary per platform:
+
+- **Linux**: `Coder Agent-<version>.AppImage` (x86_64)
+- **Windows**: `Coder Agent Setup <version>.exe` (NSIS installer)
+
+The target machine needs **nothing pre-installed** — no Python, no Node.
+The Python backend is bundled as a PyInstaller one-file executable and
+shipped inside the app (`resources/backend/`); the Electron main process
+locates and spawns it automatically (see `gui/src/main/index.ts:backendInfo`).
+
+### Building the packages
+
+```bash
+# one-time: PyInstaller in the backend venv
+cd backend && python3 -m venv .venv && .venv/bin/pip install -e . pyinstaller
+
+# Linux (build on Linux x86_64)
+./release.sh linux     # -> gui/release/Coder Agent-<ver>.AppImage
+
+# Windows (build on Windows; PyInstaller and NSIS cannot cross-compile)
+release.bat windows    # -> gui/release/Coder Agent Setup <ver>.exe
+```
+
+What the script does:
+
+1. `backend/build_standalone.py` — PyInstaller one-file build of
+   `coder_agent.server` (package data `prompts/defaults`, `defaults`,
+   `skills` are embedded) into `gui/build-resources/backend/`.
+2. `electron-builder` (config in `gui/package.json` under `"build"`) —
+   bundles `gui/dist` + the backend into the AppImage / NSIS installer.
+
+### Installing on the target machine
+
+**Linux**
+
+```bash
+chmod +x "Coder Agent-0.1.0.AppImage"
+./"Coder Agent-0.1.0.AppImage"
+```
+
+(Optionally move it to `/opt` or `~/Applications` and create a `.desktop`
+entry.) First run: click the project label in the toolbar to pick the
+project to work on, then open **Settings** to configure the LLM provider
+and API key.
+
+**Windows**
+
+Run `Coder Agent Setup 0.1.0.exe` and follow the installer (you can choose
+the install directory). Launch "Coder Agent" from the Start menu. First run
+is the same: pick a project, then configure the LLM in **Settings**.
+
+### Where the app keeps its data
+
+| What | Linux | Windows |
+|---|---|---|
+| Config, prompts, skills, memory (`~/.coder_agent`) | `~/.coder_agent` | `%USERPROFILE%\.coder_agent` |
+| GUI state (last project, userData) | `~/.config/coder-agent-gui` | `%APPDATA%/coder-agent-gui` |
+| Sessions / snapshots | `<project>/.agent` | `<project>\.agent` |
+
+The backend is a child of the GUI process: it starts with the app, can be
+restarted from the toolbar crash banner, and is killed on quit.
+If it cannot start, the window shows a "Backend process exited" banner with
+a Restart button.
+
 ## Notes
 
 - The GUI owns the Python backend: it starts it on launch, restarts it on
