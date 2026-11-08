@@ -567,7 +567,7 @@ async function settingsDialog(): Promise<boolean> {
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button></div>` +
+      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button class="close-x" title="Close">&#10005;</button></div>` +
       `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
@@ -685,9 +685,9 @@ async function settingsDialog(): Promise<boolean> {
     })();
 
     // ---- tabs
-    modal.querySelectorAll(".settings .tabs button").forEach((b) => {
+    modal.querySelectorAll(".settings .tabs button[data-p]").forEach((b) => {
       b.addEventListener("click", () => {
-        modal.querySelectorAll(".settings .tabs button").forEach((x) => x.classList.remove("active"));
+        modal.querySelectorAll(".settings .tabs button[data-p]").forEach((x) => x.classList.remove("active"));
         (b as HTMLElement).classList.add("active");
         const name = (b as HTMLElement).dataset.p!;
         modal.querySelectorAll(".settings .page").forEach((pg) => pg.classList.toggle("active", (pg as HTMLElement).dataset.p === name));
@@ -755,6 +755,7 @@ async function settingsDialog(): Promise<boolean> {
     $("modal-backdrop").classList.add("show");
     const done = (saved: boolean) => { $("modal-backdrop").classList.remove("show"); resolve(saved); };
     modal.querySelector(".no")!.addEventListener("click", () => done(false));
+    modal.querySelector(".close-x")!.addEventListener("click", () => done(false));
     modal.querySelector(".yes")!.addEventListener("click", async () => {
       // stash the prompt editor
       if (pCurrent) dirtyPrompts.set(pCurrent, pEdit.value);
