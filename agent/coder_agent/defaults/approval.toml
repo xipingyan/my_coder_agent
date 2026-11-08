@@ -13,7 +13,9 @@
 # This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
 # (lists are merged, scalars are overridden). The agent can never edit these two files without asking.
 
-auto_approve_all = false   # true: run everything not denied without asking (use with care)
+# true: run EVERYTHING that is not matched by a deny rule below without asking (commands incl. $(...),
+# heredocs, any path, and file writes). Only `deny` rules still apply. Use with care.
+auto_approve_all = false
 
 [paths]
 auto_approve = true        # false: ask again for everything that is not explicitly allowed below
