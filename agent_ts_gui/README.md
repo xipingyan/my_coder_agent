@@ -20,6 +20,8 @@ agent_ts_gui/
     src/preload/      #   type-safe bridge to the renderer
     src/renderer/     #   the UI (HTML/CSS/JS, styled to match the old PySide6 look)
   start_gui.sh
+  release.sh            # Linux AppImage build (PyInstaller backend + electron-builder)
+  release.bat           # Windows NSIS build (run on Windows)
 ```
 
 ## Run
@@ -55,8 +57,8 @@ cd gui && npm install
 
 The app is distributed as a single self-contained binary per platform:
 
-- **Linux**: `Coder Agent-<version>.AppImage` (x86_64)
-- **Windows**: `Coder Agent Setup <version>.exe` (NSIS installer)
+- **Linux**: `code_agent-<version>.AppImage` (x86_64)
+- **Windows**: `code_agent-<version>.exe` (NSIS installer)
 
 The target machine needs **nothing pre-installed** — no Python, no Node.
 The Python backend is bundled as a PyInstaller one-file executable and
@@ -70,11 +72,15 @@ locates and spawns it automatically (see `gui/src/main/index.ts:backendInfo`).
 cd backend && python3 -m venv .venv && .venv/bin/pip install -e . pyinstaller
 
 # Linux (build on Linux x86_64)
-./release.sh linux     # -> gui/release/Coder Agent-<ver>.AppImage
+./release.sh           # -> gui/release/code_agent-<ver>.AppImage
 
 # Windows (build on Windows; PyInstaller and NSIS cannot cross-compile)
-release.bat windows    # -> gui/release/Coder Agent Setup <ver>.exe
+release.bat            # -> gui/release/code_agent-<ver>.exe
 ```
+
+`release.sh` takes no arguments — it always builds the Linux AppImage.
+The Windows installer is only built by `release.bat`, which must be run on
+Windows (PyInstaller cannot cross-compile the backend).
 
 What the script does:
 
@@ -89,8 +95,8 @@ What the script does:
 **Linux**
 
 ```bash
-chmod +x "Coder Agent-0.1.0.AppImage"
-./"Coder Agent-0.1.0.AppImage"
+chmod +x code_agent-0.1.0.AppImage
+./code_agent-0.1.0.AppImage
 ```
 
 (Optionally move it to `/opt` or `~/Applications` and create a `.desktop`
@@ -100,7 +106,7 @@ and API key.
 
 **Windows**
 
-Run `Coder Agent Setup 0.1.0.exe` and follow the installer (you can choose
+Run `code_agent-0.1.0.exe` and follow the installer (you can choose
 the install directory). Launch "Coder Agent" from the Start menu. First run
 is the same: pick a project, then configure the LLM in **Settings**.
 
