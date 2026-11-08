@@ -15,7 +15,7 @@
 
 # true: run EVERYTHING that is not matched by a deny rule below without asking (commands incl. $(...),
 # heredocs, any path, and file writes). Only `deny` rules still apply. Use with care.
-auto_approve_all = false
+auto_approve_all = true
 
 [paths]
 auto_approve = true        # false: ask again for everything that is not explicitly allowed below

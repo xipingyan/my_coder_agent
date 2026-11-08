@@ -1130,6 +1130,80 @@ $("root-label").style.cursor = "pointer";
 $("root-label").title = "Click to open a different project";
 $("root-label").addEventListener("click", chooseProject);
 
+// ------------------------------------------------------- resizable splitters
+const SPLIT_DEFAULTS = { left: 260, right: 520 };
+const SPLIT_LIMITS = { left: [180, 600] as const, right: [260, 1000] as const };
+const SPLIT_STORE = "coder-agent-panel-widths";
+
+function loadSplitSizes(): { left?: number; right?: number } {
+  try {
+    const raw = localStorage.getItem(SPLIT_STORE);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSplitSizes() {
+  const sizes = {
+    left: Math.round($("left").getBoundingClientRect().width),
+    right: Math.round($("right").getBoundingClientRect().width),
+  };
+  try { localStorage.setItem(SPLIT_STORE, JSON.stringify(sizes)); } catch { /* ignore */ }
+}
+
+function setSplitLeft(w: number) { ($("left") as HTMLElement).style.width = `${w}px`; }
+function setSplitRight(w: number) { ($("right") as HTMLElement).style.width = `${w}px`; }
+
+function initSplitter(splitId: "split-left" | "split-right") {
+  const splitter = $(splitId);
+  const isLeft = splitId === "split-left";
+  const limits = SPLIT_LIMITS[isLeft ? "left" : "right"];
+  const body = $("body");
+
+  splitter.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = (isLeft ? $("left") : $("right")).getBoundingClientRect().width;
+    splitter.classList.add("dragging");
+    document.body.classList.add("resizing");
+
+    const onMove = (ev: MouseEvent) => {
+      let w = startW + (isLeft ? ev.clientX - startX : startX - ev.clientX);
+      // clamp: within limits and leave at least 120px for the middle pane
+      const room = body.getBoundingClientRect().width - 8 - 12 - 120; // padding + splitters + mid min
+      const otherW = isLeft
+        ? ($("right") as HTMLElement).getBoundingClientRect().width
+        : ($("left") as HTMLElement).getBoundingClientRect().width;
+      const maxByMid = Math.max(limits[0], room - otherW);
+      w = Math.min(Math.max(w, limits[0]), maxByMid, limits[1]);
+      if (isLeft) setSplitLeft(w); else setSplitRight(w);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      splitter.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      saveSplitSizes();
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+
+  splitter.addEventListener("dblclick", () => {
+    const w = SPLIT_DEFAULTS[isLeft ? "left" : "right"];
+    if (isLeft) setSplitLeft(w); else setSplitRight(w);
+    saveSplitSizes();
+  });
+}
+
+const savedSplits = loadSplitSizes();
+if (savedSplits.left) setSplitLeft(savedSplits.left);
+if (savedSplits.right) setSplitRight(savedSplits.right);
+initSplitter("split-left");
+initSplitter("split-right");
+
 // ------------------------------------------------------------------- boot
 let backendDown = false;
 

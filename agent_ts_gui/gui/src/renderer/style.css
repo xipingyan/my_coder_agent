@@ -55,10 +55,22 @@ button.flat { border: none; background: transparent; }
 button.flat:hover { background: #e8f0fb; }
 
 /* -------------------------------------------------------------- layout */
-#body { flex: 1; display: flex; min-height: 0; padding: 4px; gap: 4px; }
-#left { width: 260px; min-width: 180px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
-#mid { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#right { width: 520px; min-width: 260px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
+#body { flex: 1; display: flex; min-height: 0; padding: 4px; }
+#left { width: 260px; min-width: 180px; flex: none; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
+#mid { flex: 1; display: flex; flex-direction: column; min-width: 120px; }
+#right { width: 520px; min-width: 260px; flex: none; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
+.splitter {
+  flex: none;
+  width: 6px;
+  margin: 0 4px;
+  cursor: col-resize;
+  border-radius: 3px;
+  background: transparent;
+}
+.splitter:hover, .splitter.dragging { background: #b9d3ee; }
+/* while dragging: disable selection and text cursors globally */
+body.resizing { cursor: col-resize !important; user-select: none; }
+body.resizing * { cursor: col-resize !important; }
 
 /* tabs */
 #left-tabs, #right-tabs { display: flex; border-bottom: 1px solid var(--border); }
