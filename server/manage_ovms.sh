@@ -2,6 +2,8 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
+. "$SCRIPT_DIR/utils.sh"
+
 # ==================== 用户配置区 ====================
 # 1. 本地 OpenVINO IR 模型目录（Qwen3.5 VLM, int4）
 MODEL_DIR="${SCRIPT_DIR}/OpenVINO/Qwen3.8-27B-int4-ov"
@@ -11,7 +13,7 @@ SERVED_MODEL_NAME="qwen3.8-27b"
 
 # 3. 服务地址与端口
 # ServerIP 仅用于拼接客户端访问地址；BIND_ADDR 是 docker 端口发布绑定的本机地址
-ServerIP="10.239.133.43"
+ServerIP="$(get_host_ip)"
 BIND_ADDR="0.0.0.0"
 PORT="8000"
 
