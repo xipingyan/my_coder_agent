@@ -1164,15 +1164,20 @@ function initSplitter(splitId: "split-left" | "split-right") {
   splitter.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    const startX = e.clientX;
-    const startW = (isLeft ? $("left") : $("right")).getBoundingClientRect().width;
     splitter.classList.add("dragging");
     document.body.classList.add("resizing");
 
     const onMove = (ev: MouseEvent) => {
-      let w = startW + (isLeft ? ev.clientX - startX : startX - ev.clientX);
+      // position the pane absolutely from the cursor so the handle's center
+      // sits exactly under the cursor (no offset from where the mouse
+      // grabbed the handle, no transform drift):
+      //   4px body padding + 2px splitter margin + 2px half splitter width
+      const bodyRect = body.getBoundingClientRect();
+      let w = isLeft
+        ? ev.clientX - bodyRect.left - 8
+        : bodyRect.right - ev.clientX - 8;
       // clamp: within limits and leave at least 120px for the middle pane
-      const room = body.getBoundingClientRect().width - 8 - 12 - 120; // padding + splitters + mid min
+      const room = bodyRect.width - 8 - 8 - 120; // padding + splitters + mid min
       const otherW = isLeft
         ? ($("right") as HTMLElement).getBoundingClientRect().width
         : ($("left") as HTMLElement).getBoundingClientRect().width;

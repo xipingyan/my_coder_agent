@@ -61,10 +61,10 @@ button.flat:hover { background: #e8f0fb; }
 #right { width: 520px; min-width: 260px; flex: none; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
 .splitter {
   flex: none;
-  width: 6px;
-  margin: 0 4px;
+  width: 4px;
+  margin: 0 2px;
   cursor: col-resize;
-  border-radius: 3px;
+  border-radius: 2px;
   background: transparent;
 }
 .splitter:hover, .splitter.dragging { background: #b9d3ee; }
