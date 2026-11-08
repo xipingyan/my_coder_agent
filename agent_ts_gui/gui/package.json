@@ -1,5 +1,5 @@
 {
-  "name": "coder-agent-gui",
+  "name": "code_agent",
   "productName": "Coder Agent",
   "version": "0.1.0",
   "author": "Coder Agent",
@@ -42,6 +42,7 @@
     "win": {
       "target": ["nsis"]
     },
+    "artifactName": "${name}-${version}.${ext}",
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true

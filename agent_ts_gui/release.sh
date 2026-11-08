@@ -2,7 +2,7 @@
 # Build the Linux AppImage for the Coder Agent GUI.
 #
 # Usage:
-#   ./release.sh   # -> gui/release/Coder Agent-<ver>-x86_64.AppImage
+#   ./release.sh   # -> gui/release/code_agent-<ver>.AppImage
 #
 # Windows: use release.bat (on Windows; PyInstaller cannot cross-compile).
 #
