@@ -84,7 +84,12 @@ function call(method: string, params: Record<string, any> = {}): Promise<any> {
   return new Promise((resolve) => {
     nextId += 1;
     pending.set(nextId, resolve);
-    window.api.send({ id: nextId, method, params });
+    const p = window.api.send({ id: nextId, method, params });
+    if (p && typeof p.catch === "function") {
+      p.catch((e: any) => {
+        if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: `backend not connected (${e?.message ?? e})` }); }
+      });
+    }
     setTimeout(() => {
       if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: "request timed out" }); }
     }, 120000);
@@ -187,6 +192,11 @@ function reloadTaskTypes() {
 async function openProject(root: string, sessionId: string | null = null) {
   const r = await call("open_project", { root, session_id: sessionId });
   if (r && r.__error) { chat.line(`\n[error] open project: ${r.__error}`, "c-error"); return; }
+  if (backendDown) {
+    backendDown = false;
+    const banner = document.getElementById("backend-banner");
+    if (banner) banner.remove();
+  }
   S.root = r.root;
   S.taskTypes = r.task_types;
   S.effort = r.effort;
@@ -1064,6 +1074,8 @@ function switchLeftTab(name: string) {
 // ------------------------------------------------------------------ wiring
 $("send-btn").addEventListener("click", send);
 $("input").addEventListener("keydown", (e) => {
+  // ignore Enter while an IME (e.g. Chinese pinyin) composition is in progress
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); send(); }
 });
 $("stop-btn").addEventListener("click", () => {
@@ -1119,12 +1131,40 @@ $("root-label").title = "Click to open a different project";
 $("root-label").addEventListener("click", chooseProject);
 
 // ------------------------------------------------------------------- boot
-window.api.onBackendExit((code) => {
-  chat.line(`\n[backend exited (code=${code})]`, "c-error");
+let backendDown = false;
+
+function showBackendBanner(code: number | null) {
+  backendDown = true;
   setBusy(false);
+  const bar = document.createElement("div");
+  bar.id = "backend-banner";
+  bar.innerHTML = `Backend process exited (code=${code}). <button class="primary restart">Restart backend</button>`;
+  bar.querySelector(".restart")!.addEventListener("click", async () => {
+    bar.textContent = "Restarting backend...";
+    bar.style.opacity = "0.6";
+    try {
+      await window.api.restartBackend(S.root);
+    } catch (e) {
+      showBackendBanner(null);
+      return;
+    }
+    if (S.root) await openProject(S.root);
+  });
+  document.body.appendChild(bar);
+}
+
+window.api.onBackendExit((code) => {
+  if (backendDown) return;
+  chat.line(`\n[backend exited (code=${code})]`, "c-error");
+  showBackendBanner(code);
 });
 
 (async function boot() {
+  // if the backend failed to start at boot, show the restart banner immediately
+  if (!(await window.api.getBackendUrl())) {
+    showBackendBanner(null);
+    return;
+  }
   const root = (await window.api.getBackendRoot()) || (await window.api.getLastProject());
   if (root) await openProject(root);
   else {

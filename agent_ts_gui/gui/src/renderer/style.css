@@ -307,3 +307,25 @@ fieldset.grp legend { font-weight: bold; padding: 0 6px; }
 }
 .settings .toprow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .settings .toprow select { flex: 1; }
+
+/* backend-down banner */
+#backend-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  background: var(--error);
+  color: #fff;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: bold;
+}
+#backend-banner button {
+  background: #fff;
+  color: var(--error);
+  border: none;
+  font-weight: bold;
+}

@@ -47,4 +47,16 @@ cd gui && npm install
 - [x] **Phase 3** — sessions, turns, rewind / edit-and-rerun
 - [x] **Phase 4** — dialogs (approval, plan review, stage confirm, edit prompt)
 - [x] **Phase 5** — settings (model / context / task prompts / approval)
-- [ ] **Phase 6** — polish, Chinese-input check, docs
+- [x] **Phase 6** — polish: backend crash banner + in-place restart, clean shutdown
+      (backend is SIGTERM'd and the app waits for it before exiting), IME-safe
+      Enter handling, fail-fast RPC when the backend is down, English UI
+
+## Notes
+
+- The GUI owns the Python backend: it starts it on launch, restarts it on
+  demand (toolbar crash banner), and stops it on quit. The backend prints
+  `WS_URL=ws://127.0.0.1:<port>` on stdout once it is ready.
+- Automated checks: `cd backend && .venv/bin/python -m pytest tests` (WS RPC
+  integration tests), `cd gui && npx tsc --noEmit && npm run build`.
+- The renderer exposes `window.__onEvent` for CDP-based UI tests; the app can
+  be launched with `--remote-debugging-port=<port>` for that.

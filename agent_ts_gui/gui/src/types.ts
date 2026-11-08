@@ -24,6 +24,7 @@ export interface Api {
   pickDirectory: () => Promise<string | null>;
   getLastProject: () => Promise<string | null>;
   setLastProject: (p: string) => Promise<void>;
+  restartBackend: (root: string | null) => Promise<void>;
 }
 
 declare global {

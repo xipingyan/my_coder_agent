@@ -26,12 +26,20 @@ function startBackend(root: string | null): Promise<string> {
     if (root) args.push("--root", root);
     const proc = spawn(findPython(), args, { cwd: BACKEND_DIR, stdio: ["pipe", "pipe", "pipe"] });
     backend = proc;
-    let buf = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error("backend did not start within 30s")); }
+    }, 30000);
     const onLine = (line: string) => {
       const m = line.match(/^WS_URL=(\S+)$/);
-      if (m) resolve(m[1]);
-      else process.stdout.write(`[backend] ${line}\n`);
+      if (m) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(m[1]);
+      } else process.stdout.write(`[backend] ${line}\n`);
     };
+    let buf = "";
     proc.stdout.on("data", (d: Buffer) => {
       buf += d.toString();
       let i;
@@ -39,13 +47,20 @@ function startBackend(root: string | null): Promise<string> {
     });
     proc.stderr.on("data", (d: Buffer) => process.stderr.write(`[backend] ${d.toString()}`));
     proc.on("exit", (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`backend exited before it was ready (code=${code})`));
+      }
+      if (backend !== proc) return; // superseded by a restart
       backend = null;
       closeWs();
       if (window && !window.isDestroyed())
         window.webContents.send("backend-exit", code);
     });
-    proc.on("error", reject);
-    setTimeout(() => reject(new Error("backend did not start within 30s")), 30000);
+    proc.on("error", (e) => {
+      if (!settled) { settled = true; clearTimeout(timer); reject(e); }
+    });
   });
 }
 
@@ -57,11 +72,16 @@ function closeWs() {
   }
 }
 
-function connectWs(url: string) {
+function connectWs(url: string): Promise<void> {
   closeWs();
   const socket = new WebSocket(url);
   ws = socket;
-  socket.on("open", () => console.log("[main] ws connected"));
+  // resolves once the socket is open, so callers can send RPCs immediately
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.once("open", () => { console.log("[main] ws connected"); resolve(); });
+    socket.once("error", (e) => reject(e));
+  });
+  opened.catch(() => { /* close follows */ });
   socket.on("message", (data) => {
     let msg: any;
     try { msg = JSON.parse(String(data)); } catch { return; }
@@ -74,6 +94,7 @@ function connectWs(url: string) {
     if (ws === socket) ws = null;
   });
   socket.on("error", () => { /* close follows */ });
+  return opened;
 }
 
 // ------------------------------------------------------------- last project
@@ -111,9 +132,9 @@ async function createWindowAsync(root: string | null) {
   backendUrl = url;
   backendRoot = startRoot;
   console.log("[main] backend ready:", url);
-  window.webContents.send("backend-url", url);
-  connectWs(url);
   window.loadFile(path.join(__dirname, "../renderer/index.html"));
+  await connectWs(url).catch((e) => console.error("[main] ws connect failed:", e));
+  window.webContents.send("backend-url", url);
 }
 
 app.whenReady().then(() => {
@@ -126,7 +147,8 @@ app.whenReady().then(() => {
   ipcMain.handle("backend-url", () => backendUrl);
   ipcMain.handle("backend-root", () => backendRoot);
   ipcMain.handle("ws-send", (_e, payload: object) => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("backend not connected");
+    ws.send(JSON.stringify(payload));
   });
   ipcMain.handle("pick-directory", async () => {
     if (!window) return null;
@@ -145,19 +167,65 @@ app.whenReady().then(() => {
     try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }
   });
   ipcMain.handle("restart-backend", async (_e, root: string | null) => {
-    backend?.kill("SIGTERM");
-    await createWindowAsync(root);
+    // restart the backend in place (same window): kill the old proc, start a new one
+    const r = root ?? backendRoot;
+    if (backend) {
+      const old = backend;
+      backend = null; // so the old proc's exit handler is ignored
+      old.kill("SIGTERM");
+      old.stdout?.removeAllListeners();
+      // make sure the old proc is really gone before starting the new one,
+      // otherwise its stdout pipe can swallow the new WS_URL line
+      await new Promise<void>((res) => {
+        const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* ignore */ } res(); }, 2000);
+        old.once("exit", () => { clearTimeout(t); res(); });
+      });
+    }
+    closeWs();
+    try {
+      const url = await startBackend(r);
+      backendUrl = url;
+      backendRoot = r;
+      await connectWs(url);
+      if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);
+    } catch (e) {
+      console.error("[main] backend restart failed:", e);
+      if (window && !window.isDestroyed()) window.webContents.send("backend-exit", null);
+    }
   });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindowAsync(root);
   });
 });
 
+let quitting = false;
+function killBackend() {
+  if (quitting) return;
+  quitting = true;
+  // best-effort: ask the backend to stop the running turn, then kill it
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ id: 0, method: "cancel", params: {} })); } catch { /* ignore */ }
+  }
+  const proc = backend;
+  if (!proc || proc.exitCode !== null || proc.signalCode) { app.quit(); return; }
+  const finish = () => {
+    backend = null;
+    app.quit();
+  };
+  const t = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* ignore */ } }, 2500);
+  proc.once("exit", () => { clearTimeout(t); finish(); });
+  try { proc.kill("SIGTERM"); } catch { /* already dead */ }
+}
+
 app.on("window-all-closed", () => {
-  backend?.kill("SIGTERM");
-  if (process.platform !== "darwin") app.quit();
+  killBackend();
+  if (process.platform !== "darwin") app.quit(); // blocked by before-quit while the backend is alive
 });
 
-app.on("before-quit", () => {
-  backend?.kill("SIGTERM");
+app.on("before-quit", (e) => {
+  // never let the app exit while the backend process is still running
+  if (backend) {
+    e.preventDefault();
+    killBackend();
+  }
 });
