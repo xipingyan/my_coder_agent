@@ -220,3 +220,53 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
 }
 .modal .foot button.primary { background: #4a90d9; color: #fff; border-color: #4a90d9; }
 .modal .foot button.primary:hover { background: #3a80c9; }
+.modal .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.modal .row label { white-space: nowrap; }
+.modal .row input[type=text] { flex: 1; }
+.modal .row select { width: auto; }
+.modal .full { width: 100%; margin-top: 8px; }
+
+/* approval diff view */
+.diff {
+  font-family: "Noto Sans Mono CJK SC", "DejaVu Sans Mono", monospace;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px;
+  margin-top: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.diff .add { color: var(--add); }
+.diff .del { color: var(--del); }
+.diff .hunk { color: var(--hunk); }
+
+/* plan review table */
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.plan-table th, .plan-table td {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.plan-table th { background: #f0f0f0; }
+.plan-table input, .plan-table select {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 2px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.plan-table .goal-cell { min-width: 200px; }
+.plan-table tr.selected td { background: #d5e5f7; }
+.modal.wide { width: 1000px; }
+.modal .table-tools { display: flex; gap: 8px; margin-top: 8px; }

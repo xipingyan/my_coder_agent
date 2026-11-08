@@ -388,6 +388,146 @@ function editPromptModal(title: string, info: string, prompt: string): Promise<{
   });
 }
 
+// ------------------------------------------------- approval / plan / stage
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function diffHtml(text: string): string {
+  return text.split("\n").map((ln) => {
+    if (ln.startsWith("+") && !ln.startsWith("+++")) return `<span class="add">${esc(ln)}</span>`;
+    if (ln.startsWith("-") && !ln.startsWith("---")) return `<span class="del">${esc(ln)}</span>`;
+    if (ln.startsWith("@@")) return `<span class="hunk">${esc(ln)}</span>`;
+    return esc(ln);
+  }).join("\n");
+}
+
+function approvalDialog(req: Record<string, any>): Promise<Record<string, any>> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.className = "modal";
+    const what = req.kind === "command" ? "Run command" : "Write file";
+    modal.innerHTML =
+      `<div class="head"></div>` +
+      `<div class="body"><div class="diff"></div>` +
+      `<div class="row"><label>Remember rule:</label><input type="text" class="rule"/><select class="scope"><option>project</option><option>user</option></select></div>` +
+      `<input type="text" class="full feedback" placeholder="Optional feedback sent to the model when rejecting"/>` +
+      `<div class="foot"><button class="reject">Reject</button><button class="allow">Allow once</button><button class="primary remember">Allow && remember rule</button></div>`;
+    modal.querySelector(".head")!.textContent = `${what}: ${req.title ?? ""}`;
+    modal.querySelector(".diff")!.innerHTML = diffHtml(req.detail ?? "");
+    (modal.querySelector(".rule") as HTMLInputElement).value = req.suggested_rule ?? "";
+    (modal.querySelector(".feedback") as HTMLInputElement).value = "";
+    $("modal-backdrop").classList.add("show");
+    const done = (resp: Record<string, any>) => { $("modal-backdrop").classList.remove("show"); resolve(resp); };
+    modal.querySelector(".allow")!.addEventListener("click", () => done({ allow: true }));
+    modal.querySelector(".remember")!.addEventListener("click", () => done({
+      allow: true,
+      remember_rule: (modal.querySelector(".rule") as HTMLInputElement).value.trim(),
+      remember_scope: (modal.querySelector(".scope") as HTMLSelectElement).value,
+    }));
+    modal.querySelector(".reject")!.addEventListener("click", () => done({
+      allow: false,
+      feedback: (modal.querySelector(".feedback") as HTMLInputElement).value.trim(),
+    }));
+  });
+}
+
+function stageDialog(report: Record<string, any>): Promise<string> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.className = "modal";
+    const subs: any[] = report.subtasks ?? [];
+    let anyFailed = false;
+    const rows = subs.map((s) => {
+      const bad = ["failed", "skipped", "cancelled"].includes(s.status);
+      anyFailed = anyFailed || bad;
+      const cls = bad ? "c-error" : "c-ok";
+      return `<div class="${cls} b">${esc(s.id)}  [${esc(s.status ?? "")}]  ${esc(s.title ?? "")}</div>` +
+        `<div>${esc(s.summary || "(no summary)")}</div><div>&nbsp;</div>`;
+    }).join("");
+    modal.innerHTML =
+      `<div class="head"></div>` +
+      `<div class="body">${rows}` +
+      `<div class="b">Files changed so far by this plan:</div><div class="diff"></div></div>` +
+      `<div class="foot"><button class="stop">Stop here</button><button class="retry">Retry failed</button><button class="primary cont">Continue</button></div>`;
+    modal.querySelector(".head")!.textContent = `Stage ${(report.index ?? 0) + 1}/${report.total ?? 0} finished`;
+    modal.querySelector(".diff")!.textContent = (report.changed_files ?? []).join("\n") || "(none)";
+    const cont = modal.querySelector(".cont") as HTMLButtonElement;
+    cont.textContent = report.is_last ? "Finish" : `Continue to stage ${(report.index ?? 0) + 2}`;
+    (modal.querySelector(".retry") as HTMLButtonElement).disabled = !anyFailed;
+    $("modal-backdrop").classList.add("show");
+    const done = (v: string) => { $("modal-backdrop").classList.remove("show"); resolve(v); };
+    modal.querySelector(".cont")!.addEventListener("click", () => done("continue"));
+    modal.querySelector(".retry")!.addEventListener("click", () => done("retry"));
+    modal.querySelector(".stop")!.addEventListener("click", () => done("stop"));
+  });
+}
+
+function planDialog(plan: Record<string, any>, typeNames: string[]): Promise<Record<string, any> | null> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.className = "modal wide";
+    const subs: any[] = ((plan.subtasks ?? []) as any[]).map((s: any) => ({
+      id: s.id ?? "", title: s.title ?? "", goal: s.goal ?? "",
+      depends_on: (s.depends_on ?? []).join(", "), task_type: s.task_type ?? "general",
+      files: (s.files ?? []).join(", "),
+    }));
+    const opts = typeNames.map((n) => `<option>${esc(n)}</option>`).join("");
+    modal.innerHTML =
+      `<div class="head"></div>` +
+      `<div class="body"><div class="info">The plan below was generated for your goal. Edit, add or remove subtasks, then run it. Subtasks without dependencies between them may run in parallel.</div>` +
+      `<table class="plan-table"><thead><tr><th>id</th><th>title</th><th>depends on</th><th>task type</th><th>files</th><th class="goal-cell">goal</th></tr></thead><tbody></tbody></table>` +
+      `<div class="table-tools"><button class="add">Add subtask</button><button class="rem">Remove selected</button></div></div>` +
+      `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Run plan</button></div>`;
+    modal.querySelector(".head")!.textContent = "Review plan";
+    const tbody = modal.querySelector("tbody")!;
+    subs.forEach((s) => tbody.insertAdjacentHTML("beforeend", planRow(s, opts)));
+
+    function planRow(s: any, o: string): string {
+      const sel = o.replace(new RegExp(`<option>${esc(s.task_type)}</option>`), `<option selected>${esc(s.task_type)}</option>`);
+      return `<tr><td><input class="c-id" value="${esc(s.id)}"/></td>` +
+        `<td><input class="c-title" value="${esc(s.title)}"/></td>` +
+        `<td><input class="c-deps" value="${esc(s.depends_on)}"/></td>` +
+        `<td><select class="c-type">${sel}</select></td>` +
+        `<td><input class="c-files" value="${esc(s.files)}"/></td>` +
+        `<td class="goal-cell"><input class="c-goal" value="${esc(s.goal)}"/></td></tr>`;
+    }
+
+    modal.querySelector(".add")!.addEventListener("click", () => {
+      const n = tbody.rows.length + 1;
+      tbody.insertAdjacentHTML("beforeend", planRow({ id: `T${n}`, title: "", goal: "", depends_on: "", task_type: typeNames[0] ?? "general", files: "" }, opts));
+    });
+    modal.querySelector(".rem")!.addEventListener("click", () => {
+      const sel = [...tbody.querySelectorAll("tr.selected")];
+      if (sel.length) sel.forEach((tr) => tr.remove());
+    });
+    tbody.addEventListener("click", (e) => {
+      const tr = (e.target as HTMLElement).closest("tr");
+      if (!tr) return;
+      const was = tr.classList.contains("selected");
+      tbody.querySelectorAll("tr.selected").forEach((x) => x.classList.remove("selected"));
+      if (!was) tr.classList.add("selected");
+    });
+
+    $("modal-backdrop").classList.add("show");
+    const done = (v: Record<string, any> | null) => { $("modal-backdrop").classList.remove("show"); resolve(v); };
+    modal.querySelector(".no")!.addEventListener("click", () => done(null));
+    modal.querySelector(".yes")!.addEventListener("click", () => {
+      const out = [...tbody.rows].map((tr) => {
+        const g = (c: string) => (tr.querySelector(c) as HTMLInputElement | HTMLSelectElement).value.trim();
+        return {
+          id: g(".c-id"), title: g(".c-title"),
+          depends_on: g(".c-deps") ? g(".c-deps").split(",").map((x) => x.trim()).filter(Boolean) : [],
+          task_type: g(".c-type"),
+          files: g(".c-files") ? g(".c-files").split(",").map((x) => x.trim()).filter(Boolean) : [],
+          goal: g(".c-goal"),
+        };
+      }).filter((s) => s.id || s.goal);
+      done({ goal: plan.goal ?? "", subtasks: out });
+    });
+  });
+}
+
 // ------------------------------------------------- turn actions (rewind / edit)
 async function impactText(turnId: string): Promise<string> {
   const r = await call("rewind_impact", { turn_id: turnId });
@@ -479,7 +619,8 @@ function afterSubmit(r: any) {
 
 // ------------------------------------------------------------------- events
 window.api.onEvent(onEvent);
-(window as any).__dispatchEvent = onEvent; // test hook (CDP smoke tests)
+// exposed for automated UI tests (CDP)
+(window as any).__onEvent = onEvent;
 
 function onEvent(ev: AgentEvent) {
   const k = ev.event;
@@ -582,11 +723,24 @@ function onEvent(ev: AgentEvent) {
       refreshContextEstimate();
     })();
   } else if (k === "approval_requested") {
-    // dialog comes in Phase 4; for now just log so the user sees what is pending
     log(ev, `approval requested: ${d.title ?? d.kind}`, "c-warn");
-    chat.line(`\n[approval requested: ${d.title ?? d.kind} — dialog coming in Phase 4]`, "c-warn");
-  } else if (k === "plan_review_requested" || k === "stage_confirm_requested") {
-    log(ev, `${k.replace("_requested", "")} requested (dialog coming in Phase 4)`, "c-warn");
+    void (async () => {
+      const resp = await approvalDialog(d);
+      await call("answer", { req_id: d.req_id, response: resp });
+    })();
+  } else if (k === "plan_review_requested") {
+    log(ev, "plan review requested", "c-warn");
+    void (async () => {
+      const plan = await planDialog(d, S.taskTypes);
+      // null = cancelled (plan rejected); otherwise the (possibly edited) plan dict
+      await call("answer", { req_id: d.req_id, response: plan });
+    })();
+  } else if (k === "stage_confirm_requested") {
+    log(ev, "stage confirm requested", "c-warn");
+    void (async () => {
+      const decision = await stageDialog(d);
+      await call("answer", { req_id: d.req_id, response: decision });
+    })();
   }
 }
 
