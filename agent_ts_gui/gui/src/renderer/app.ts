@@ -1136,10 +1136,29 @@ function switchLeftTab(name: string) {
 
 // --------------------------------------------------------------- file attach
 // Insert a file's content into the prompt so it is part of the message
-// sent to the agent.
+// sent to the agent. Only text-like files are accepted.
 const MAX_FILE_CHARS = 100_000; // keep the prompt manageable
+const TEXT_EXTS = new Set([
+  ".txt", ".md", ".markdown", ".log", ".text",
+  ".json", ".jsonc", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+  ".csv", ".tsv", ".xml", ".html", ".htm", ".css", ".scss", ".less",
+  ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
+  ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".hh", ".cs", ".rs",
+  ".go", ".java", ".kt", ".swift", ".m", ".mm", ".rb", ".php", ".lua", ".pl",
+  ".py", ".sh", ".bash", ".zsh", ".bat", ".ps1", ".sql", ".r", ".dart",
+  ".tex", ".proto", ".cmake", ".makefile",
+]);
+
+function isTextFile(p: string): boolean {
+  const ext = p.slice(p.lastIndexOf(".")).toLowerCase();
+  return TEXT_EXTS.has(ext);
+}
 
 async function insertFile(p: string) {
+  if (!isTextFile(p)) {
+    chat.line(`\n[skipped ${p}: only text files can be inserted]`, "c-warn");
+    return;
+  }
   const r = await window.api.readFile(p);
   if (r.error) {
     chat.line(`\n[could not read ${p}: ${r.error}]`, "c-error");
