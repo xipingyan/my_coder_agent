@@ -17,6 +17,9 @@ if errorlevel 1 exit /b 1
 echo ==^> collecting server artifact
 cd ..
 for /f "delims=" %%v in ('node -p "require('./gui/package.json').version"') do set VER=%%v
+rem unpacked runnable binary (release\code_agent-<ver>-win)
+if exist "gui\release\code_agent-%VER%-win" rmdir /s /q "gui\release\code_agent-%VER%-win"
+move "gui\release\win-unpacked" "gui\release\code_agent-%VER%-win" >nul
 copy gui\build-resources\backend\coder-agent-server.exe "gui\release\coder-agent-server-%VER%.win.exe"
 (
 echo @echo off

@@ -9,8 +9,8 @@
     "build": "node build.mjs",
     "dev": "npm run build && electron --no-sandbox .",
     "start": "npm run build && electron --no-sandbox .",
-    "dist:linux": "npm run build && electron-builder --linux AppImage",
-    "dist:win": "npm run build && electron-builder --win nsis"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -36,11 +36,11 @@
       }
     ],
     "linux": {
-      "target": ["AppImage"],
+      "target": ["AppImage", "dir"],
       "category": "Development"
     },
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis", "dir"]
     },
     "artifactName": "${name}-${version}.${ext}",
     "nsis": {

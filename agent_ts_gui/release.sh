@@ -25,6 +25,9 @@ echo "==> collecting server artifact"
 cd ..
 VER=$(node -p "require('./gui/package.json').version")
 mkdir -p gui/release
+# unpacked runnable binary (release/code_agent-<ver>-linux)
+cp -r "gui/release/linux-unpacked" "gui/release/code_agent-${VER}-linux"
+rm -rf gui/release/linux-unpacked
 cp gui/build-resources/backend/coder-agent-server "gui/release/coder-agent-server-${VER}.linux"
 # plain server launcher: run it on the server machine, point the GUI at host:port
 cat > "gui/release/coder-agent-server-${VER}.linux.sh" <<'EOF'
