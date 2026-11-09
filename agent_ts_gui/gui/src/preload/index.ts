@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld("api", {
   getLastProject: (): Promise<string | null> => ipcRenderer.invoke("last-project"),
   setLastProject: (p: string): Promise<void> => ipcRenderer.invoke("set-last-project", p),
   restartBackend: (root: string | null): Promise<void> => ipcRenderer.invoke("restart-backend", root),
+  getConnection: (): Promise<{ mode: string; host: string; port: number; token: string }> => ipcRenderer.invoke("get-connection"),
+  setConnection: (c: { mode: string; host: string; port: number; token: string }): Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }> => ipcRenderer.invoke("set-connection", c),
 });

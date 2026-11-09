@@ -129,6 +129,7 @@ class Server:
         self.plans: Optional[PlanAsk] = None
         self.ws: Any = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.token: str = ""  # if set, the first message must be {"token": ...}
         self.pending: dict[str, _Pending] = {}
         self._send_lock = asyncio.Lock()
         self._busy = False
@@ -140,6 +141,7 @@ class Server:
         return {
             "ping": lambda p: "pong",
             "open_project": self.open_project,
+            "list_dir": self.list_dir,
             "submit": self.submit,
             "submit_plan": self.submit_plan,
             "cancel": self.cancel,
@@ -261,6 +263,27 @@ class Server:
         e = self._require_engine()
         prompt, task_type = p.get("prompt", ""), p.get("task_type")
         return self._start_turn(lambda: e.submit(prompt, task_type))
+
+    def list_dir(self, p: dict) -> dict:
+        """List a directory on the machine the server runs on.
+
+        Used by the GUI's project picker: in local mode the native file dialog
+        is fine, but for a remote server the GUI must browse the remote
+        filesystem through this RPC.
+        """
+        path = Path(p.get("path") or str(Path.home())).expanduser()
+        if not path.is_dir():
+            raise NotADirectoryError(str(path))
+        out: list[dict] = []
+        try:
+            for entry in sorted(path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+                try:
+                    out.append({"name": entry.name, "dir": entry.is_dir()})
+                except OSError:
+                    continue  # unreadable entry (permissions) - skip it
+        except PermissionError as e:
+            raise PermissionError(str(path)) from e
+        return {"path": str(path.resolve()), "parent": str(path.parent) if path.parent != path else None, "entries": out}
 
     def submit_plan(self, p: dict) -> dict:
         e = self._require_engine()
@@ -467,9 +490,19 @@ class Server:
     # ------------------------------------------------------------- lifecycle
     async def attach(self, ws) -> None:
         self.loop = asyncio.get_running_loop()
-        self.ws = ws
+        old = self.ws
+        self.ws = ws  # a new client takes over; the old one is dropped
+        if old is not None and old is not ws:
+            try:
+                await old.close(code=1000, reason="replaced by a new client")
+            except Exception:  # noqa: BLE001
+                pass
 
-    async def detach(self) -> None:
+    async def detach(self, ws=None) -> None:
+        # only the currently attached client detaches; a replaced client's
+        # handler ending must not clear the new client's socket
+        if ws is not None and self.ws is not ws:
+            return
         self.ws = None
         # answer every pending question with its cancel value so workers unblock
         for pend in list(self.pending.values()):
@@ -482,7 +515,10 @@ class Server:
 
 # --------------------------------------------------------------------- main
 async def handler(ws, server: Server) -> None:
+    # One GUI connection at a time: a new client takes over (the old one is
+    # detached and its pending questions are answered with their cancel values).
     await server.attach(ws)
+    authed = False  # per-connection: server.token must stay set for future clients
     try:
         async for raw in ws:
             try:
@@ -490,6 +526,19 @@ async def handler(ws, server: Server) -> None:
             except (ValueError, TypeError):
                 await server.send({"error": "invalid json"})
                 continue
+            # token handshake: when the server was started with --token, the
+            # first message must be {"token": <secret>} before any RPC.
+            if server.token and not authed:
+                if msg.get("token"):
+                    if msg["token"] != server.token:
+                        await server.send({"error": "bad token"})
+                        await ws.close()
+                        return
+                    authed = True  # authenticated for the life of THIS connection
+                    continue
+                await server.send({"error": "token required"})
+                await ws.close()
+                return
             mid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
             fn = server._methods.get(method)
             if fn is None:
@@ -501,19 +550,28 @@ async def handler(ws, server: Server) -> None:
             except Exception as e:  # noqa: BLE001 - report any failure to the GUI
                 await server.send({"id": mid, "error": f"{type(e).__name__}: {e}"})
     finally:
-        await server.detach()
+        await server.detach(ws)
 
 
 def run(argv: list[str], provider_factory: ProviderFactory = None) -> int:
     ap = argparse.ArgumentParser(description="Coder Agent backend server")
     ap.add_argument("--root", help="project root (optional)")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="interface to bind (default 127.0.0.1; use 0.0.0.0 for remote GUIs)")
+    ap.add_argument("--port", type=int, default=0,
+                    help="port to listen on (default: pick a free one)")
+    ap.add_argument("--token", default=None,
+                    help="shared secret: the GUI must send it as the first message")
     args = ap.parse_args(argv)
 
     async def _run() -> None:
         server = Server(Path(args.root) if args.root else None, provider_factory)
-        srv = await websockets.serve(lambda ws, *args: handler(ws, server), "127.0.0.1", 0)
+        server.token = args.token or ""
+        srv = await websockets.serve(lambda ws, *args: handler(ws, server), args.host, args.port)
         port = srv.sockets[0].getsockname()[1]
-        print(f"WS_URL=ws://127.0.0.1:{port}", flush=True)
+        print(f"WS_URL=ws://{args.host}:{port}", flush=True)
+        if args.token:
+            print("TOKEN=required", flush=True)
         await asyncio.Future()  # run forever
 
     try:

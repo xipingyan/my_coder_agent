@@ -14,5 +14,26 @@ cd gui
 call npm run dist:win
 if errorlevel 1 exit /b 1
 
+echo ==^> collecting server artifact
+cd ..
+for /f "delims=" %%v in ('node -p "require('./gui/package.json').version"') do set VER=%%v
+copy gui\build-resources\backend\coder-agent-server.exe "gui\release\coder-agent-server-%VER%.win.exe"
+(
+echo @echo off
+echo rem Coder Agent server launcher (Windows).
+echo rem Usage: coder-agent-server-%VER%.win.bat [port] [token]
+echo rem then in the GUI: Settings ^> Connection ^> mode "remote", host, port, token.
+echo setlocal
+echo cd /d "%%~dp0"
+echo set PORT=%1
+echo if "%PORT%"=="" set PORT=8931
+echo set TOKEN=%2
+echo if "%TOKEN%"=="" (
+echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT%
+echo ) else (
+echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT% --token %TOKEN%
+echo )
+) > "gui\release\coder-agent-server-%VER%.win.bat"
+
 echo ==^> done, artifacts in gui\release\
-dir release
+dir gui\release

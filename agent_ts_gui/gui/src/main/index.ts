@@ -27,6 +27,33 @@ let backendUrl: string | null = null;
 let backendRoot: string | null = null;
 let window: BrowserWindow | null = null;
 let ws: WebSocket | null = null;
+let reconnecting = false; // suppress "backend-exit" while switching connections
+
+// ------------------------------------------------------------- connection
+// mode "local"  = spawn the bundled backend on this machine (default, as before).
+// mode "remote" = connect to a coder-agent-server running on another machine
+// (or on this machine, started separately). One server serves one GUI.
+interface Connection { mode: "local" | "remote"; host: string; port: number; token: string; }
+const DEFAULT_CONN: Connection = { mode: "local", host: "127.0.0.1", port: 8931, token: "" };
+let conn: Connection = { ...DEFAULT_CONN };
+
+function connFile(): string {
+  return path.join(app.getPath("userData"), "connection.json");
+}
+function loadConn(): Connection {
+  try {
+    if (fs.existsSync(connFile())) {
+      const c = JSON.parse(fs.readFileSync(connFile(), "utf8"));
+      return { mode: c.mode === "remote" ? "remote" : "local",
+        host: String(c.host || "127.0.0.1"), port: Number(c.port) || 8931, token: String(c.token || "") };
+    }
+  } catch { /* ignore */ }
+  return { ...DEFAULT_CONN };
+}
+function saveConn(c: Connection) {
+  conn = c;
+  try { fs.writeFileSync(connFile(), JSON.stringify(c, null, 2)); } catch { /* ignore */ }
+}
 
 // ------------------------------------------------------------- backend proc
 function startBackend(root: string | null): Promise<string> {
@@ -63,9 +90,11 @@ function startBackend(root: string | null): Promise<string> {
         clearTimeout(timer);
         reject(new Error(`backend exited before it was ready (code=${code})`));
       }
-      if (backend !== proc) return; // superseded by a restart
+      if (backend !== proc) return; // superseded by a restart / connection switch
       backend = null;
       closeWs();
+      // while switching connections the old proc dying is expected: no banner
+      if (reconnecting) { reconnecting = false; return; }
       if (window && !window.isDestroyed())
         window.webContents.send("backend-exit", code);
     });
@@ -83,13 +112,18 @@ function closeWs() {
   }
 }
 
-function connectWs(url: string): Promise<void> {
+function connectWs(url: string, token = ""): Promise<void> {
   closeWs();
   const socket = new WebSocket(url);
   ws = socket;
   // resolves once the socket is open, so callers can send RPCs immediately
   const opened = new Promise<void>((resolve, reject) => {
-    socket.once("open", () => { console.log("[main] ws connected"); resolve(); });
+    socket.once("open", () => {
+      console.log("[main] ws connected");
+      // token handshake: must be the very first frame when the server requires one
+      if (token) { try { socket.send(JSON.stringify({ token })); } catch { /* ignore */ } }
+      resolve();
+    });
     socket.once("error", (e) => reject(e));
   });
   opened.catch(() => { /* close follows */ });
@@ -139,6 +173,21 @@ async function createWindowAsync(root: string | null) {
   window.loadFile(path.join(__dirname, "../renderer/index.html"));
   const startRoot = root ?? lastProject();
   let url: string;
+  if (conn.mode === "remote") {
+    url = `ws://${conn.host}:${conn.port}`;
+    console.log("[main] remote mode, connecting to", url);
+    try {
+      await connectWs(url, conn.token);
+    } catch (e) {
+      console.error("[main] remote connect failed:", e);
+      window.webContents.send("backend-exit", null);
+      return;
+    }
+    backendUrl = url;
+    backendRoot = startRoot;
+    window.webContents.send("backend-url", url);
+    return;
+  }
   try {
     url = await startBackend(startRoot);
   } catch (e) {
@@ -153,6 +202,7 @@ async function createWindowAsync(root: string | null) {
 }
 
 app.whenReady().then(() => {
+  conn = loadConn();
   const args = process.argv.slice(app.isPackaged ? 1 : 2);
   let root: string | null = null;
   const i = args.indexOf("--root");
@@ -188,6 +238,52 @@ app.whenReady().then(() => {
   ipcMain.handle("set-last-project", (_e, p: string) => {
     try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }
   });
+  ipcMain.handle("get-connection", () => conn);
+  ipcMain.handle("set-connection", async (_e, c: object) => {
+    reconnecting = true; // cleared when the old proc's exit handler fires (or on timeout)
+    setTimeout(() => { reconnecting = false; }, 15000);
+    return doSetConnection(c);
+  });
+  async function doSetConnection(c: any): Promise<object> {
+    // switch local <-> remote. c: {mode, host, port, token}
+    const next: Connection = {
+      mode: c.mode === "remote" ? "remote" : "local",
+      host: String(c.host || "127.0.0.1"),
+      port: Number(c.port) || 8931,
+      token: String(c.token || ""),
+    };
+    if (next.mode === conn.mode && next.host === conn.host && next.port === conn.port && next.token === conn.token)
+      return { ok: true, reconnected: false };
+    saveConn(next);
+    // reconnect in place: drop the old connection, then start/connect the new one
+    if (backend) {
+      const old = backend;
+      backend = null;
+      old.kill("SIGTERM");
+      old.stdout?.removeAllListeners();
+      await new Promise<void>((res) => {
+        const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* ignore */ } res(); }, 2000);
+        old.once("exit", () => { clearTimeout(t); res(); });
+      });
+    }
+    closeWs();
+    backendUrl = null;
+    try {
+      let url: string;
+      if (next.mode === "remote") {
+        url = `ws://${next.host}:${next.port}`;
+        await connectWs(url, next.token);
+      } else {
+        url = await startBackend(backendRoot ?? lastProject());
+      }
+      backendUrl = url;
+      if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);
+      return { ok: true, reconnected: true, url };
+    } catch (e: any) {
+      if (window && !window.isDestroyed()) window.webContents.send("backend-exit", null);
+      return { ok: false, error: String(e?.message ?? e) };
+    }
+  }
   ipcMain.handle("restart-backend", async (_e, root: string | null) => {
     // restart the backend in place (same window): kill the old proc, start a new one.
     // If no project was ever opened (e.g. the first start failed), fall back to
@@ -207,10 +303,16 @@ app.whenReady().then(() => {
     }
     closeWs();
     try {
-      const url = await startBackend(r);
+      let url: string;
+      if (conn.mode === "remote") {
+        // remote mode: "restart" = reconnect to the remote server
+        url = `ws://${conn.host}:${conn.port}`;
+        await connectWs(url, conn.token);
+      } else {
+        url = await startBackend(r);
+        backendRoot = r;
+      }
       backendUrl = url;
-      backendRoot = r;
-      await connectWs(url);
       if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);
     } catch (e) {
       console.error("[main] backend restart failed:", e);

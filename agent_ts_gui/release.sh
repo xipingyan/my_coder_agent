@@ -21,5 +21,27 @@ echo "==> building GUI (electron-builder)"
 cd gui
 npm run dist:linux
 
+echo "==> collecting server artifact"
+cd ..
+VER=$(node -p "require('./gui/package.json').version")
+mkdir -p gui/release
+cp gui/build-resources/backend/coder-agent-server "gui/release/coder-agent-server-${VER}.linux"
+# plain server launcher: run it on the server machine, point the GUI at host:port
+cat > "gui/release/coder-agent-server-${VER}.linux.sh" <<'EOF'
+#!/usr/bin/env bash
+# Coder Agent server launcher (Linux).
+# Usage: <this script> [port] [token]
+# then in the GUI: Settings > Connection > mode "remote", host, port, token.
+set -euo pipefail
+cd "$(dirname "$0")"
+PORT="${1:-8931}"
+TOKEN="${2:-}"
+ARGS=(--host 0.0.0.0 --port "$PORT")
+[ -n "$TOKEN" ] && ARGS+=(--token "$TOKEN")
+exec ./__SERVER_BIN__ "${ARGS[@]}"
+EOF
+sed -i "s/__SERVER_BIN__/coder-agent-server-${VER}.linux/" "gui/release/coder-agent-server-${VER}.linux.sh"
+chmod +x "gui/release/coder-agent-server-${VER}.linux" "gui/release/coder-agent-server-${VER}.linux.sh"
+
 echo "==> done, artifacts in gui/release/"
-ls -l release
+ls -l gui/release

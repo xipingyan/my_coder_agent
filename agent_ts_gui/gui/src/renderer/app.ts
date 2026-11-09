@@ -192,6 +192,10 @@ function reloadTaskTypes() {
   if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
 }
 
+function savedProjectFor(root: string): SavedProject | null {
+  return loadProjects().find((p) => p.path === root) ?? null;
+}
+
 async function openProject(root: string, sessionId: string | null = null) {
   const r = await call("open_project", { root, session_id: sessionId });
   if (r && r.__error) { chat.line(`\n[error] open project: ${r.__error}`, "c-error"); return; }
@@ -207,9 +211,19 @@ async function openProject(root: string, sessionId: string | null = null) {
   S.compressThreshold = r.config?.context?.compress_threshold ?? 0.95;
   S.compressTarget = r.config?.context?.compress_target ?? 0.5;
   S.config = r.config;
-  $("root-label").textContent = ` Project: ${r.root} `;
-  $("root-label").title = r.root;
-  document.title = `Coder Agent - ${r.root.split(/[\\/]/).pop()}`;
+  let saved = savedProjectFor(r.root);
+  if (!saved) {
+    // a project opened outside the dialog (e.g. --root at boot): remember it
+    // under its folder name so it can be re-opened by name next time. The path
+    // is on the backend machine, hence mode "remote" (same machine in the
+    // local-server build).
+    saved = { name: r.root.split(/[\\/]/).filter(Boolean).pop() ?? r.root, mode: "remote", path: r.root };
+    rememberProject(saved.name, saved.mode, saved.path);
+  }
+  setLastProjectName(saved.name);
+  $("root-label").textContent = ` Project: ${saved ? saved.name + "  " : ""}${r.root} `;
+  $("root-label").title = `${saved ? saved.name + " (" + saved.mode + ")\n" : ""}${r.root}`;
+  document.title = `Coder Agent - ${saved ? saved.name : r.root.split(/[\\/]/).pop()}`;
   ($("effort-combo") as HTMLSelectElement).value = S.effort;
   window.api.setLastProject(r.root);
   reloadTaskTypes();
@@ -570,8 +584,8 @@ async function settingsDialog(): Promise<boolean> {
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button class="close-x" title="Close">&#10005;</button></div>` +
-      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div></div>` +
+      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Connection</button><button class="close-x" title="Close">&#10005;</button></div>` +
+      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div><div class="page" data-p="connection"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
 
@@ -713,6 +727,48 @@ async function settingsDialog(): Promise<boolean> {
       aEdit.value = r.text;
       aPage.querySelector(".apath")!.textContent = `User-wide approval policy: ${r.path} (projects can add rules in <project>/.agent/approval.toml)`;
     })();
+
+    // ---- connection tab (GUI <-> agent server; independent of the LLM "server" above)
+    const cPage = modal.querySelector<HTMLElement>('.page[data-p="connection"]')!;
+    cPage.innerHTML =
+      `<fieldset class="grp"><legend>Agent server connection</legend>` +
+      `<div class="field"><span class="lbl">mode</span><select class="c-mode"><option value="local">local (this machine, auto-started)</option><option value="remote">remote (coder-agent-server on another machine)</option></select></div>` +
+      `<div class="field"><span class="lbl">host</span><input type="text" class="c-host"/></div>` +
+      `<div class="field"><span class="lbl">port</span><input type="number" class="c-port"/></div>` +
+      `<div class="field"><span class="lbl">token</span><input type="text" class="c-token" placeholder="shared secret (server started with --token)"/></div>` +
+      `</fieldset>` +
+      `<div class="btnrow"><button class="c-apply">Apply &amp; reconnect</button></div>` +
+      `<div class="msg"></div>` +
+      `<div class="tip" style="font-size:11px;color:#888">Local mode: the backend runs on this machine and is started automatically. ` +
+      `Remote mode: run "coder-agent-server --host 0.0.0.0 --port &lt;port&gt; --token &lt;secret&gt;" on the server machine, ` +
+      `then connect here. One server serves one GUI; the project paths are on the server machine. ` +
+      `The connection is saved in this app's user data and used at next start.</div>`;
+    void (async () => {
+      const c = await window.api.getConnection();
+      (cPage.querySelector(".c-mode") as HTMLSelectElement).value = c.mode;
+      (cPage.querySelector(".c-host") as HTMLInputElement).value = c.host;
+      (cPage.querySelector(".c-port") as HTMLInputElement).value = String(c.port);
+      (cPage.querySelector(".c-token") as HTMLInputElement).value = c.token;
+    })();
+    cPage.querySelector(".c-apply")!.addEventListener("click", async () => {
+      const m = cPage.querySelector(".msg") as HTMLElement;
+      const btn = cPage.querySelector(".c-apply") as HTMLButtonElement;
+      btn.disabled = true;
+      m.className = "msg"; m.textContent = "Reconnecting...";
+      const r = await window.api.setConnection({
+        mode: (cPage.querySelector(".c-mode") as HTMLSelectElement).value as "local" | "remote",
+        host: (cPage.querySelector(".c-host") as HTMLInputElement).value.trim() || "127.0.0.1",
+        port: Number((cPage.querySelector(".c-port") as HTMLInputElement).value) || 8931,
+        token: (cPage.querySelector(".c-token") as HTMLInputElement).value,
+      });
+      btn.disabled = false;
+      if (!r.ok) { showMsg(cPage, false, String(r.error)); return; }
+      if (r.reconnected) {
+        showMsg(cPage, true, `Connected to ${r.url}. The current project will be reopened.`);
+      } else {
+        showMsg(cPage, true, "No change.");
+      }
+    });
 
     // ---- tabs
     modal.querySelectorAll(".settings .tabs button[data-p]").forEach((b) => {
@@ -1245,22 +1301,174 @@ $("sp-btn").addEventListener("click", async () => {
   modal.querySelector(".yes")!.addEventListener("click", () => $("modal-backdrop").classList.remove("show"));
 });
 
-async function chooseProject() {
-  if (S.busy) return;
-  const dir = await window.api.pickDirectory();
-  if (!dir) return;
-  if (!bootDone) {
+// ------------------------------------------------------------- projects
+// Saved projects are remembered by name (localStorage): {name, mode, path}.
+// mode "local"  = path on the machine the GUI runs on (native pick dialog).
+// mode "remote" = path on the machine the backend runs on (browsed via the
+// list_dir RPC). In the current local-server build both resolve to the same
+// machine, but the split keeps the remote build a pure renderer change.
+interface SavedProject { name: string; mode: "local" | "remote"; path: string; }
+
+const PROJECTS_KEY = "coder-agent.projects";
+const LAST_PROJECT_KEY = "coder-agent.last-project";
+
+function loadProjects(): SavedProject[] {
+  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? "[]"); } catch { return []; }
+}
+function saveProjects(list: SavedProject[]) {
+  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+}
+function lastProjectName(): string | null {
+  try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+}
+function setLastProjectName(name: string | null) {
+  try { if (name) localStorage.setItem(LAST_PROJECT_KEY, name); else localStorage.removeItem(LAST_PROJECT_KEY); } catch { /* ignore */ }
+}
+
+function rememberProject(name: string, mode: "local" | "remote", path: string) {
+  const list = loadProjects().filter((p) => !(p.name === name && p.path === path));
+  list.push({ name, mode, path });
+  saveProjects(list);
+}
+
+async function openProjectNamed(name: string, mode: "local" | "remote", path: string) {
+  rememberProject(name, mode, path);
+  setLastProjectName(name);
+  if (!(await window.api.getBackendUrl())) {
     // backend not ready yet: queue it, boot / the backend-url listener opens it
-    S.pendingRoot = dir;
-    chat.line(`\nProject queued: ${dir} (will open when the backend is ready)`, "c-muted");
+    S.pendingRoot = path;
+    chat.line(`\nProject queued: ${path} (will open when the backend is ready)`, "c-muted");
     return;
   }
-  openProject(dir);
+  openProject(path);
+}
+
+// remote directory browser: a simple path bar + entry list via the list_dir RPC
+function browseRemoteDir(initial: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const modal = $("modal");
+    modal.className = "modal wide";
+    modal.innerHTML =
+      `<div class="head">Choose a directory (on the backend machine)</div>` +
+      `<div class="body"><div class="field"><input type="text" class="pathbar" placeholder="/path/to/project"/></div>` +
+      `<div class="dirlist"></div><div class="msg"></div></div>` +
+      `<div class="foot"><button class="up">..</button><span class="flex1"></span>` +
+      `<button class="no">Cancel</button><button class="primary yes">Use this folder</button></div>`;
+    const pathbar = modal.querySelector<HTMLInputElement>(".pathbar")!;
+    const listEl = modal.querySelector(".dirlist")!;
+    const msg = modal.querySelector(".msg")!;
+    let cur = "";
+
+    async function load(dir: string) {
+      const r = await call("list_dir", { path: dir });
+      if (r && r.__error) { msg.className = "msg err"; msg.textContent = r.__error; return; }
+      msg.textContent = "";
+      cur = r.path;
+      pathbar.value = cur;
+      listEl.innerHTML = r.entries.map((e: any) =>
+        `<div class="dirent${e.dir ? " dir" : ""}"><span class="ico">${e.dir ? "📁" : "📄"}</span>${esc(e.name)}</div>`).join("");
+      listEl.querySelectorAll(".dirent").forEach((el, idx) => {
+        (el as HTMLElement).dataset.name = r.entries[idx].name;
+        if (r.entries[idx].dir) {
+          el.addEventListener("dblclick", () => void load(cur + (cur.endsWith("/") ? "" : "/") + r.entries[idx].name));
+        }
+      });
+    }
+
+    pathbar.addEventListener("keydown", (e) => { if (e.key === "Enter") void load(pathbar.value.trim() || cur); });
+    modal.querySelector(".up")!.addEventListener("click", () => {
+      const parent = cur.replace(/[\\/][^\\/]+$/, "");
+      if (parent && parent !== cur) void load(parent);
+    });
+    modal.querySelector(".yes")!.addEventListener("click", () => { $("modal-backdrop").classList.remove("show"); resolve(cur); });
+    modal.querySelector(".no")!.addEventListener("click", () => { $("modal-backdrop").classList.remove("show"); resolve(null); });
+    $("modal-backdrop").classList.add("show");
+    void load(initial);
+  });
+}
+
+async function projectsDialog(): Promise<void> {
+  const list = loadProjects();
+  const last = lastProjectName();
+  const modal = $("modal");
+  modal.className = "modal wide";
+  modal.innerHTML =
+    `<div class="head">Projects</div>` +
+    `<div class="body"><div class="projlist"></div>` +
+    `<div class="msg"></div>` +
+    `<div class="btnrow"><button class="add-local">+ Local project...</button>` +
+    `<button class="add-remote">+ Remote project...</button>` +
+    `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
+    `<div class="tip" style="font-size:11px;color:#888">Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). Projects are remembered by name.</div></div>` +
+    `<div class="foot"><button class="primary yes">Close</button></div>`;
+  const listEl = modal.querySelector(".projlist")!;
+  const msg = modal.querySelector(".msg")!;
+  let selected: SavedProject | null = null;
+
+  function render() {
+    listEl.innerHTML = list.map((p, i) =>
+      `<div class="projrow${p === selected ? " sel" : ""}">` +
+      `<span class="pname">${esc(p.name)}${p.name === last ? "  (last)" : ""}</span>` +
+      `<span class="pmode">${p.mode}</span><span class="ppath">${esc(p.path)}</span></div>`).join("");
+    listEl.querySelectorAll(".projrow").forEach((el) => {
+      el.addEventListener("click", () => { selected = list[[...listEl.querySelectorAll(".projrow")].indexOf(el)]; render(); });
+      el.addEventListener("dblclick", () => { if (selected) { $("modal-backdrop").classList.remove("show"); void openProjectNamed(selected.name, selected.mode, selected.path); } });
+    });
+  }
+  render();
+
+  modal.querySelector(".add-local")!.addEventListener("click", async () => {
+    const dir = await window.api.pickDirectory();
+    if (!dir) return;
+    const name = window.prompt("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+    if (!name) return;
+    list.push({ name, mode: "local", path: dir });
+    saveProjects(list);
+    selected = list[list.length - 1];
+    render();
+  });
+  modal.querySelector(".add-remote")!.addEventListener("click", async () => {
+    const dir = await browseRemoteDir("");
+    if (!dir) return;
+    const name = window.prompt("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+    if (!name) return;
+    list.push({ name, mode: "remote", path: dir });
+    saveProjects(list);
+    selected = list[list.length - 1];
+    render();
+  });
+  modal.querySelector(".rename")!.addEventListener("click", () => {
+    if (!selected) return;
+    const name = window.prompt("New name:", selected.name);
+    if (!name) return;
+    selected.name = name;
+    saveProjects(list);
+    render();
+  });
+  modal.querySelector(".del")!.addEventListener("click", () => {
+    if (!selected) return;
+    const i = list.indexOf(selected);
+    if (i >= 0) {
+      list.splice(i, 1);
+      saveProjects(list);
+      if (selected.name === lastProjectName()) setLastProjectName(null);
+      selected = null;
+      render();
+    }
+  });
+  modal.querySelector(".yes")!.addEventListener("click", () => $("modal-backdrop").classList.remove("show"));
+  $("modal-backdrop").classList.add("show");
+}
+
+async function chooseProject() {
+  if (S.busy) return;
+  void projectsDialog();
 }
 
 $("root-label").style.cursor = "pointer";
 $("root-label").title = "Click to open a different project";
 $("root-label").addEventListener("click", chooseProject);
+$("projects-btn").addEventListener("click", chooseProject);
 
 // ------------------------------------------------------- resizable splitters
 const SPLIT_DEFAULTS = { left: 260, right: 520, input: 130 };
@@ -1462,12 +1670,19 @@ window.api.onBackendUrl(async () => {
     $("state-label").textContent = "Backend not running";
     return;
   }
-  const root = (await window.api.getBackendRoot()) || (await window.api.getLastProject()) || S.pendingRoot;
+  // reopen the last project by its remembered name (falls back to the old
+  // plain-path record, then to whatever the main process started with)
+  const last = lastProjectName();
+  const savedLast = last ? loadProjects().find((p) => p.name === last) : null;
+  const root = savedLast?.path
+    || S.pendingRoot
+    || (await window.api.getLastProject())
+    || (await window.api.getBackendRoot());
   S.pendingRoot = null;
   if (root) {
     await openProject(root);
   } else {
-    chat.line("No project open yet. Click the project label above to choose one.", "c-muted");
+    chat.line("No project open yet. Click the Projects button above to choose one.", "c-muted");
     $("state-label").textContent = "No project";
   }
 })();

@@ -27,6 +27,15 @@ export interface Api {
   getLastProject: () => Promise<string | null>;
   setLastProject: (p: string) => Promise<void>;
   restartBackend: (root: string | null) => Promise<void>;
+  getConnection: () => Promise<Connection>;
+  setConnection: (c: Connection) => Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }>;
+}
+
+export interface Connection {
+  mode: "local" | "remote";
+  host: string;
+  port: number;
+  token: string;
 }
 
 declare global {
