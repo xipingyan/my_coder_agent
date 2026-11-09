@@ -1400,22 +1400,41 @@ async function projectsDialog(): Promise<void> {
     `<button class="add-remote">+ Remote project...</button>` +
     `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
     `<div class="tip" style="font-size:11px;color:#888">Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). Projects are remembered by name.</div></div>` +
-    `<div class="foot"><button class="primary yes">Close</button></div>`;
+    `<div class="foot"><button class="open">Open</button><span class="flex1"></span><button class="primary yes">Close</button></div>`;
   const listEl = modal.querySelector(".projlist")!;
   const msg = modal.querySelector(".msg")!;
   let selected: SavedProject | null = null;
 
   function render() {
     listEl.innerHTML = list.map((p, i) =>
-      `<div class="projrow${p === selected ? " sel" : ""}">` +
+      `<div class="projrow${p === selected ? " sel" : ""}" data-idx="${i}">` +
       `<span class="pname">${esc(p.name)}${p.name === last ? "  (last)" : ""}</span>` +
       `<span class="pmode">${p.mode}</span><span class="ppath">${esc(p.path)}</span></div>`).join("");
-    listEl.querySelectorAll(".projrow").forEach((el) => {
-      el.addEventListener("click", () => { selected = list[[...listEl.querySelectorAll(".projrow")].indexOf(el)]; render(); });
-      el.addEventListener("dblclick", () => { if (selected) { $("modal-backdrop").classList.remove("show"); void openProjectNamed(selected.name, selected.mode, selected.path); } });
-    });
   }
   render();
+
+  // event delegation: render() rebuilds the rows, so listeners must live on
+  // the container (per-row listeners are lost on re-render and the old
+  // double-click handler never fired after the selection re-render).
+  listEl.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement).closest(".projrow");
+    if (!row) return;
+    selected = list[Number(row.dataset.idx)] ?? null;
+    render();
+  });
+  listEl.addEventListener("dblclick", (e) => {
+    const row = (e.target as HTMLElement).closest(".projrow");
+    if (!row) return;
+    const p = list[Number(row.dataset.idx)];
+    if (!p) return;
+    $("modal-backdrop").classList.remove("show");
+    void openProjectNamed(p.name, p.mode, p.path);
+  });
+  modal.querySelector(".open")!.addEventListener("click", () => {
+    if (!selected) return;
+    $("modal-backdrop").classList.remove("show");
+    void openProjectNamed(selected.name, selected.mode, selected.path);
+  });
 
   modal.querySelector(".add-local")!.addEventListener("click", async () => {
     const dir = await window.api.pickDirectory();
