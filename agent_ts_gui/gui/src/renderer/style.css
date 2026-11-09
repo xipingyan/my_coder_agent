@@ -61,15 +61,15 @@ button.flat:hover { background: #e8f0fb; }
 #right { width: 520px; min-width: 260px; flex: none; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); }
 .splitter {
   flex: none;
-  width: 4px;
+  width: 2px;
   margin: 0 2px;
   cursor: col-resize;
-  border-radius: 2px;
+  border-radius: 1px;
   background: transparent;
 }
 .splitter.h {
   width: auto;
-  height: 4px;
+  height: 2px;
   margin: 2px 0;
   cursor: row-resize;
 }
