@@ -136,7 +136,7 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
   resize: none;
   padding: 8px;
 }
-#send-row { display: flex; justify-content: flex-end; padding-top: 4px; }
+#send-row { display: flex; justify-content: flex-end; padding-top: 4px; gap: 8px; }
 .flex1 { flex: 1; }
 
 /* log panes (right side) */

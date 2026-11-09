@@ -180,6 +180,7 @@ async function refreshServerInfo() {
 function setBusy(busy: boolean) {
   S.busy = busy;
   ($("send-btn") as HTMLButtonElement).disabled = busy;
+  ($("resend-btn") as HTMLButtonElement).disabled = busy;
   ($("stop-btn") as HTMLButtonElement).disabled = !busy;
   ($("input") as HTMLTextAreaElement).readOnly = busy;
 }
@@ -870,6 +871,30 @@ function send() {
   }
 }
 
+// Re-send the last prompt: rewind to it (discarding it and later turns),
+// then submit the same prompt again.
+async function resend() {
+  if (S.busy || !S.root) return;
+  const turns = await call("session_turns");
+  if (turns && turns.__error) { chat.line(`\n[error] ${turns.__error}`, "c-error"); return; }
+  const active = (turns.turns ?? []).filter((t: any) => t.active);
+  const last = active[active.length - 1];
+  if (!last) { chat.line("\n[nothing to re-send: no turns yet]", "c-warn"); return; }
+  const info = await impactText(last.id);
+  if (info.startsWith("RuntimeError") || info.startsWith("turn not on")) { chat.line(`\n[error] ${info}`, "c-error"); return; }
+  const ok = await confirmModal("Re-send last prompt", `Rewind to the last prompt and send it again:\n\n"${last.prompt}"\n\n${info}\n\nContinue?`);
+  if (!ok) return;
+  const wasPlan = last.task_type === "plan";
+  const r = await call("edit_and_resubmit", {
+    turn_id: last.id, prompt: last.prompt,
+    task_type: wasPlan ? null : (last.task_type || null),
+    keep_branch: false, plan_mode: wasPlan,
+  });
+  if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
+  setBusy(true);
+  S.thinkChars = 0;
+}
+
 function afterSubmit(r: any) {
   if (r && r.__error) {
     chat.line(`\n[error] ${r.__error}`, "c-error");
@@ -1080,6 +1105,7 @@ function switchLeftTab(name: string) {
 
 // ------------------------------------------------------------------ wiring
 $("send-btn").addEventListener("click", send);
+$("resend-btn").addEventListener("click", resend);
 $("input").addEventListener("keydown", (e) => {
   // ignore Enter while an IME (e.g. Chinese pinyin) composition is in progress
   if (e.isComposing || e.keyCode === 229) return;
