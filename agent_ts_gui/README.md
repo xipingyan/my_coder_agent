@@ -57,8 +57,8 @@ cd gui && npm install
 
 The app is distributed as a single self-contained binary per platform:
 
-- **Linux**: `code_agent-<version>.AppImage` (x86_64)
-- **Windows**: `code_agent-<version>.exe` (NSIS installer)
+- **Linux**: `coder-agent-<version>.AppImage` (x86_64)
+- **Windows**: `coder-agent-<version>.exe` (NSIS installer)
 
 The target machine needs **nothing pre-installed** — no Python, no Node.
 The Python backend is bundled as a PyInstaller one-file executable and
@@ -72,10 +72,10 @@ locates and spawns it automatically (see `gui/src/main/index.ts:backendInfo`).
 cd backend && python3 -m venv .venv && .venv/bin/pip install -e . pyinstaller
 
 # Linux (build on Linux x86_64)
-./release.sh           # -> gui/release/code_agent-<ver>.AppImage
+./release.sh           # -> gui/release/coder-agent-<ver>.AppImage
 
 # Windows (build on Windows; PyInstaller and NSIS cannot cross-compile)
-release.bat            # -> gui/release/code_agent-<ver>.exe
+release.bat            # -> gui/release/coder-agent-<ver>.exe
 ```
 
 `release.sh` takes no arguments — it always builds the Linux AppImage.
@@ -95,8 +95,8 @@ What the script does:
 **Linux**
 
 ```bash
-chmod +x code_agent-0.1.0.AppImage
-./code_agent-0.1.0.AppImage
+chmod +x coder-agent-0.1.0.AppImage
+./coder-agent-0.1.0.AppImage
 ```
 
 (Optionally move it to `/opt` or `~/Applications` and create a `.desktop`
@@ -106,7 +106,7 @@ and API key.
 
 **Windows**
 
-Run `code_agent-0.1.0.exe` and follow the installer (you can choose
+Run `coder-agent-0.1.0.exe` and follow the installer (you can choose
 the install directory). Launch "Coder Agent" from the Start menu. First run
 is the same: pick a project, then configure the LLM in **Settings**.
 

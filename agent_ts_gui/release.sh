@@ -2,7 +2,7 @@
 # Build the Linux AppImage for the Coder Agent GUI.
 #
 # Usage:
-#   ./release.sh   # -> gui/release/code_agent-<ver>.AppImage
+#   ./release.sh   # -> gui/release/coder-agent-<ver>.AppImage
 #
 # Windows: use release.bat (on Windows; PyInstaller cannot cross-compile).
 #
@@ -25,8 +25,8 @@ echo "==> collecting server artifact"
 cd ..
 VER=$(node -p "require('./gui/package.json').version")
 mkdir -p gui/release
-# unpacked runnable binary (release/code_agent-<ver>-linux)
-cp -r "gui/release/linux-unpacked" "gui/release/code_agent-${VER}-linux"
+# unpacked runnable binary (release/coder-agent-<ver>-linux)
+cp -r "gui/release/linux-unpacked" "gui/release/coder-agent-${VER}-linux"
 rm -rf gui/release/linux-unpacked
 cp gui/build-resources/backend/coder-agent-server "gui/release/coder-agent-server-${VER}.linux"
 # plain server launcher: run it on the server machine, point the GUI at host:port
