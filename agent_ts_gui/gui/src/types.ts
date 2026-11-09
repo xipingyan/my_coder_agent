@@ -22,6 +22,8 @@ export interface Api {
   onReply: (cb: (msg: ReplyMsg) => void) => void;
   onEvent: (cb: (ev: AgentEvent) => void) => void;
   pickDirectory: () => Promise<string | null>;
+  pickFiles: () => Promise<string[]>;
+  readFile: (p: string) => Promise<{ content?: string; error?: string }>;
   getLastProject: () => Promise<string | null>;
   setLastProject: (p: string) => Promise<void>;
   restartBackend: (root: string | null) => Promise<void>;

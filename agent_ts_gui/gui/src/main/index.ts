@@ -170,6 +170,20 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog(window, { properties: ["openDirectory"] });
     return r.canceled ? null : r.filePaths[0];
   });
+  ipcMain.handle("pick-files", async () => {
+    if (!window) return [];
+    const r = await dialog.showOpenDialog(window, { properties: ["openFile", "multiSelections"] });
+    return r.canceled ? [] : r.filePaths;
+  });
+  ipcMain.handle("read-file", (_e, p: string): { content?: string; error?: string } => {
+    try {
+      const buf = fs.readFileSync(p);
+      if (buf.includes(0)) return { error: "binary file" };
+      return { content: buf.toString("utf8") };
+    } catch (e: any) {
+      return { error: String(e?.message ?? e) };
+    }
+  });
   ipcMain.handle("last-project", () => lastProject());
   ipcMain.handle("set-last-project", (_e, p: string) => {
     try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }

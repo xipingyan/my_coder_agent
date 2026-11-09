@@ -1134,6 +1134,48 @@ function switchLeftTab(name: string) {
   btn?.click();
 }
 
+// --------------------------------------------------------------- file attach
+// Insert a file's content into the prompt so it is part of the message
+// sent to the agent.
+const MAX_FILE_CHARS = 100_000; // keep the prompt manageable
+
+async function insertFile(p: string) {
+  const r = await window.api.readFile(p);
+  if (r.error) {
+    chat.line(`\n[could not read ${p}: ${r.error}]`, "c-error");
+    return;
+  }
+  let content = r.content!;
+  let note = "";
+  if (content.length > MAX_FILE_CHARS) {
+    content = content.slice(0, MAX_FILE_CHARS);
+    note = `\n... (truncated, ${content.length} of ${r.content!.length} chars)`;
+  }
+  const input = $("input") as HTMLTextAreaElement;
+  const cur = input.value;
+  const sep = cur && !cur.endsWith("\n") ? "\n" : "";
+  input.value = `${cur}${sep}\n<file ${p}>\n${content}${note}\n</file>\n`;
+  input.focus();
+}
+
+$("attach-btn").addEventListener("click", async () => {
+  const files = await window.api.pickFiles();
+  for (const f of files) await insertFile(f);
+});
+
+// Drag & drop files onto the prompt: insert their content.
+const inputEl = $("input") as HTMLTextAreaElement;
+inputEl.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.dataTransfer!.dropEffect = "copy";
+});
+inputEl.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer!.files).map((f: any) => f.path).filter(Boolean);
+  if (!files.length) return; // plain text drop: let the browser handle it
+  for (const f of files) await insertFile(f);
+});
+
 // ------------------------------------------------------------------ wiring
 $("send-btn").addEventListener("click", send);
 $("resend-btn").addEventListener("click", resend);
