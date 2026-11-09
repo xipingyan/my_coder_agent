@@ -113,6 +113,15 @@ function lastProjectFile(): string {
   return path.join(app.getPath("userData"), "last-project.txt");
 }
 
+function lastProject(): string | null {
+  const p = lastProjectFile();
+  if (fs.existsSync(p)) {
+    const last = fs.readFileSync(p, "utf8").trim();
+    if (last && fs.existsSync(last)) return last;
+  }
+  return null;
+}
+
 async function createWindowAsync(root: string | null) {
   window = new BrowserWindow({
     width: 1500,
@@ -128,14 +137,7 @@ async function createWindowAsync(root: string | null) {
   // Python backend starts (it takes a few seconds). The renderer shows a
   // "Starting backend..." state and waits for the "backend-url" event.
   window.loadFile(path.join(__dirname, "../renderer/index.html"));
-  let startRoot = root;
-  if (!startRoot) {
-    const p = lastProjectFile();
-    if (fs.existsSync(p)) {
-      const last = fs.readFileSync(p, "utf8").trim();
-      if (last && fs.existsSync(last)) startRoot = last;
-    }
-  }
+  const startRoot = root ?? lastProject();
   let url: string;
   try {
     url = await startBackend(startRoot);
@@ -168,20 +170,15 @@ app.whenReady().then(() => {
     const r = await dialog.showOpenDialog(window, { properties: ["openDirectory"] });
     return r.canceled ? null : r.filePaths[0];
   });
-  ipcMain.handle("last-project", () => {
-    const p = lastProjectFile();
-    if (fs.existsSync(p)) {
-      const last = fs.readFileSync(p, "utf8").trim();
-      if (last && fs.existsSync(last)) return last;
-    }
-    return null;
-  });
+  ipcMain.handle("last-project", () => lastProject());
   ipcMain.handle("set-last-project", (_e, p: string) => {
     try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }
   });
   ipcMain.handle("restart-backend", async (_e, root: string | null) => {
-    // restart the backend in place (same window): kill the old proc, start a new one
-    const r = root ?? backendRoot;
+    // restart the backend in place (same window): kill the old proc, start a new one.
+    // If no project was ever opened (e.g. the first start failed), fall back to
+    // the last project so the new backend still starts with a root.
+    const r = root ?? backendRoot ?? lastProject();
     if (backend) {
       const old = backend;
       backend = null; // so the old proc's exit handler is ignored

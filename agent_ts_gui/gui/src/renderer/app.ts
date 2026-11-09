@@ -1294,7 +1294,9 @@ function showBackendBanner(code: number | null) {
       showBackendBanner(null);
       return;
     }
-    const r = S.root || S.pendingRoot;
+    // S.root is null when the first start failed (no project was ever opened);
+    // the main process may have started the backend with the last project instead
+    const r = S.root || S.pendingRoot || (await window.api.getBackendRoot());
     S.pendingRoot = null;
     if (r) await openProject(r);
   });
@@ -1310,12 +1312,12 @@ window.api.onBackendExit((code) => {
 
 // if the backend (re)connects while the banner is up (e.g. it was a false
 // alarm from the boot timeout), dismiss it and open the project again
-window.api.onBackendUrl(() => {
+window.api.onBackendUrl(async () => {
   if (!backendDown) return;
   backendDown = false;
   const banner = document.getElementById("backend-banner");
   if (banner) banner.remove();
-  const r = S.root || S.pendingRoot;
+  const r = S.root || S.pendingRoot || (await window.api.getBackendRoot());
   S.pendingRoot = null;
   if (r) openProject(r);
 });
