@@ -622,6 +622,33 @@ async function settingsDialog(): Promise<boolean> {
       group("thinking", "Thinking") +
       group("sampling", "Sampling");
 
+    // ---- model history (per provider, localStorage)
+    const MODEL_HIST_KEY = "agent_ts_gui.model_history";
+    function modelHistory(): Record<string, string[]> {
+      try { return JSON.parse(localStorage.getItem(MODEL_HIST_KEY) ?? "{}"); } catch { return {}; }
+    }
+    function recordModel(provider: string, model: string) {
+      if (!model) return;
+      const h = modelHistory();
+      const list = h[provider] ?? [];
+      h[provider] = [model, ...list.filter((x) => x !== model)].slice(0, 50);
+      try { localStorage.setItem(MODEL_HIST_KEY, JSON.stringify(h)); } catch { /* ignore */ }
+    }
+    const modelInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="model"]')!;
+    modelInput.setAttribute("list", "model-dl");
+    const modelDl = modelPage.ownerDocument.createElement("datalist");
+    modelDl.id = "model-dl";
+    modelPage.appendChild(modelDl);
+    function updateModelDl() {
+      const provider = cfg.server?.provider ?? "";
+      const cur = modelInput.value.trim();
+      const list = modelHistory()[provider] ?? [];
+      const opts = cur && !list.includes(cur) ? [cur, ...list] : list;
+      modelDl.innerHTML = opts.map((m) => `<option value="${esc(m)}"></option>`).join("");
+    }
+    updateModelDl();
+    modelPage.querySelector('[data-s="server"][data-k="provider"]')!.addEventListener("change", updateModelDl);
+
     const ctxPage = modal.querySelector<HTMLElement>('.page[data-p="context"]')!;
     ctxPage.innerHTML =
       group("context", "Context / compression") +
@@ -737,6 +764,9 @@ async function settingsDialog(): Promise<boolean> {
       m.className = "msg"; m.textContent = "Testing...";
       const r = await call("test_connection", { config: collect() });
       if (r && r.__error) { showMsg(modelPage, false, String(r.__error)); return; }
+      const provider = collect().server?.provider ?? "";
+      for (const m of r.models ?? []) recordModel(provider, m);
+      updateModelDl();
       showMsg(modelPage, true, `Models:\n${(r.models ?? []).join("\n")}\n\n${r.context_text ?? ""}`);
     });
     ctxPage.querySelector(".detect")!.addEventListener("click", async () => {
@@ -773,6 +803,7 @@ async function settingsDialog(): Promise<boolean> {
           if (ar && ar.__error) throw new Error("approval policy: " + ar.__error);
         }
         S.config = collect();
+        recordModel(S.config.server?.provider ?? "", S.config.server?.model ?? "");
         S.taskTypes = r.task_types ?? S.taskTypes;
         S.effort = S.config.thinking?.effort ?? S.effort;
         S.ctxMax = S.config.context?.max_tokens ?? S.ctxMax;
