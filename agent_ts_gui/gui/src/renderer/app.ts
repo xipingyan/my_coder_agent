@@ -1188,20 +1188,20 @@ function initSplitter(splitId: "split-left" | "split-right") {
     document.body.classList.add("resizing");
     // where inside the handle the mouse grabbed it, so the pane does not
     // jump on the first move
-    const grab = e.clientX - (splitter.getBoundingClientRect().left + 2);
+    const grab = e.clientX - (splitter.getBoundingClientRect().left + 1);
 
     const onMove = (ev: MouseEvent) => {
       // position the pane absolutely from the cursor: the handle's center
       // stays at (cursor - grab) at all times.
-      //   4px body padding + 2px splitter margin + 2px half splitter width = 8px
+      //   4px body padding + 2px splitter margin + 1px half splitter width = 7px
       // (w is the border-box width, so the pane border is already inside it)
       const bodyRect = body.getBoundingClientRect();
       let w = isLeft
-        ? ev.clientX - grab - bodyRect.left - 8
-        : bodyRect.right - (ev.clientX - grab) - 8;
+        ? ev.clientX - grab - bodyRect.left - 7
+        : bodyRect.right - (ev.clientX - grab) - 7;
       // clamp: within limits and leave at least 120px for the middle pane.
-      // non-mid space = 2x padding(4) + 4x margins(2) + 2x splitters(4) = 24
-      const room = bodyRect.width - 24 - 120;
+      // non-mid space = 2x padding(4) + 4x margins(2) + 2x splitters(2) = 22
+      const room = bodyRect.width - 22 - 120;
       const otherW = isLeft
         ? ($("right") as HTMLElement).offsetWidth
         : ($("left") as HTMLElement).offsetWidth;
@@ -1238,13 +1238,13 @@ function initInputSplitter() {
     e.preventDefault();
     splitter.classList.add("dragging");
     document.body.classList.add("resizing-h");
-    const grab = e.clientY - (splitter.getBoundingClientRect().top + 2);
+    const grab = e.clientY - (splitter.getBoundingClientRect().top + 1);
 
     const onMove = (ev: MouseEvent) => {
       // zone height from the cursor: the handle center is 2px (zone margin)
-      // + 2px (half splitter) above the zone top
+      // + 1px (half splitter) above the zone top
       const midRect = mid.getBoundingClientRect();
-      let h = midRect.bottom - (ev.clientY - grab) - 4;
+      let h = midRect.bottom - (ev.clientY - grab) - 3;
       h = Math.min(Math.max(h, limits[0]), limits[1]);
       setSplitInput(h);
     };
