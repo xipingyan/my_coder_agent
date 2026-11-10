@@ -150,6 +150,7 @@ class Server:
             "new_session": self.new_session,
             "open_session": self.open_session,
             "delete_session": self.delete_session,
+            "delete_sessions": self.delete_sessions,
             "save_config": self.save_config,
             "test_connection": self.test_connection,
             "context_info": self.context_info,
@@ -331,9 +332,21 @@ class Server:
         was_current = p["session_id"] == e.session.id
         Session.delete(e.root, p["session_id"])
         if was_current:
-            self.open_project({"root": str(e.root)})  # start a fresh session
+            e.session = Session(e.root)  # start a fresh session
             return {"ok": True, "new_session": e.session.id}
         return {"ok": True}
+
+    def delete_sessions(self, p: dict) -> dict:
+        e = self._require_engine()
+        if self._busy:
+            raise RuntimeError("a turn is running")
+        ids = [str(i) for i in (p.get("session_ids") or [])]
+        for sid in ids:
+            Session.delete(e.root, sid)
+        if e.session.id in ids:
+            e.session = Session(e.root)  # start a fresh session
+            return {"ok": True, "deleted": len(ids), "new_session": e.session.id}
+        return {"ok": True, "deleted": len(ids)}
 
     def save_config(self, p: dict) -> dict:
         e = self._require_engine()

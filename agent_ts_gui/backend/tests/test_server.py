@@ -234,3 +234,24 @@ def test_busy_guard_and_sessions(server_process):
             assert len(r["text"]) > 100
 
     asyncio.run(scenario())
+
+
+def test_delete_sessions(server_process):
+    url, project, home = server_process
+
+    async def scenario():
+        async with websockets.connect(url) as ws:
+            c = Client(ws)
+            others = [(await c.call("open_project", root=str(project)))["session_id"] for _ in range(2)]
+            current = (await c.call("open_project", root=str(project)))["session_id"]
+            # delete two non-current sessions
+            r = await c.call("delete_sessions", session_ids=others)
+            assert r["ok"] and r["deleted"] == 2 and "new_session" not in r
+            # (summaries only list sessions with turns, so just check the deleted ones are gone)
+            left = [s["id"] for s in (await c.call("session_summaries"))["sessions"]]
+            assert not (set(others) & set(left))
+            # deleting the current session starts a fresh one
+            r = await c.call("delete_sessions", session_ids=[current])
+            assert r["ok"] and r["new_session"] != current
+
+    asyncio.run(scenario())

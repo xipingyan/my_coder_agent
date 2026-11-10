@@ -310,6 +310,7 @@ async function refreshSessionList() {
   if (!r || r.__error) return;
   const ul = $("session-list");
   ul.innerHTML = "";
+  let lastClicked: HTMLElement | null = null;
   for (const s of r.sessions) {
     const when = new Date(s.updated * 1000);
     const stamp = `${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")} ` +
@@ -318,28 +319,50 @@ async function refreshSessionList() {
     li.textContent = `${s.id === r.current ? "● " : ""}${stamp}  ${s.title || "(empty)"}`;
     li.title = `${s.title}\n${s.turns} turn(s), last status: ${s.status}\n${s.id}`;
     if (s.id === r.current) li.classList.add("current");
+    li.addEventListener("click", (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        li.classList.toggle("selected");
+      } else if (e.shiftKey && lastClicked) {
+        const items = Array.from(ul.children) as HTMLElement[];
+        const a = items.indexOf(lastClicked), b = items.indexOf(li);
+        for (const it of items.slice(Math.min(a, b), Math.max(a, b) + 1)) it.classList.add("selected");
+      } else {
+        for (const it of ul.children) it.classList.remove("selected");
+        li.classList.add("selected");
+      }
+      lastClicked = li;
+    });
     li.addEventListener("dblclick", () => {
       if (S.busy || s.id === r.current) return;
       openProject(S.root!, s.id).then(() => switchLeftTab("turns"));
     });
     li.addEventListener("contextmenu", (e) => {
       e.preventDefault();
+      const sel = Array.from(ul.querySelectorAll("li.selected")).map((el) => (el as HTMLElement).dataset.id!);
+      if (!sel.includes(s.id)) {
+        for (const it of ul.children) it.classList.remove("selected");
+        li.classList.add("selected");
+        sel.push(s.id);
+      }
       showMenu(e.clientX, e.clientY, [
         { label: "Open", enabled: !S.busy && s.id !== r.current,
           fn: () => openProject(S.root!, s.id).then(() => switchLeftTab("turns")) },
-        { label: "Delete session...", enabled: !S.busy, fn: () => deleteSession(s.id) },
+        { label: sel.length > 1 ? `Delete ${sel.length} selected sessions...` : "Delete session...",
+          enabled: !S.busy, fn: () => deleteSessions(sel) },
       ]);
     });
+    li.dataset.id = s.id;
     ul.appendChild(li);
   }
 }
 
-async function deleteSession(sid: string) {
-  const ok = await confirmModal("Delete session",
-    "Delete this session and its file snapshots?\nFiles in the project are not touched, but this " +
-    "session can no longer be rewound.");
+async function deleteSessions(ids: string[]) {
+  const n = ids.length;
+  const ok = await confirmModal("Delete session" + (n > 1 ? "s" : ""),
+    `Delete ${n} session${n > 1 ? "s" : ""} and their file snapshots?\n` +
+    "Files in the project are not touched, but these sessions can no longer be rewound.");
   if (!ok) return;
-  const r = await call("delete_session", { session_id: sid });
+  const r = await call("delete_sessions", { session_ids: ids });
   if (r && r.__error) { chat.line(`\n[error] ${r.__error}`, "c-error"); return; }
   if (r.new_session) {
     // the current session was deleted: the backend started a fresh one

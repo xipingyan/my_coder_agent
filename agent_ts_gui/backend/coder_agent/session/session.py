@@ -157,6 +157,8 @@ class Session:
     @classmethod
     def load(cls, root: Path, session_id: str) -> "Session":
         s = cls(root, session_id)
+        if not s.file.exists():
+            return s  # known but not yet saved (current session with no turns)
         data = json.loads(s.file.read_text(encoding="utf-8"))
         s.head = data.get("head")
         for td in data.get("turns", []):
