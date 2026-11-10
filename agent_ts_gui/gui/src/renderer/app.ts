@@ -338,6 +338,7 @@ async function refreshSessionList() {
     });
     li.addEventListener("contextmenu", (e) => {
       e.preventDefault();
+      e.stopPropagation();  // the document-level handler would hide the menu right away
       const sel = Array.from(ul.querySelectorAll("li.selected")).map((el) => (el as HTMLElement).dataset.id!);
       if (!sel.includes(s.id)) {
         for (const it of ul.children) it.classList.remove("selected");
