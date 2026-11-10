@@ -4,6 +4,7 @@ import type { AgentEvent, ReplyMsg } from "../types";
 
 contextBridge.exposeInMainWorld("api", {
   getBackendUrl: (): Promise<string | null> => ipcRenderer.invoke("backend-url"),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke("app-version"),
   getBackendRoot: (): Promise<string | null> => ipcRenderer.invoke("backend-root"),
   onBackendUrl: (cb: (url: string) => void) => ipcRenderer.on("backend-url", (_e, url) => cb(url)),
   onBackendExit: (cb: (code: number | null) => void) => ipcRenderer.on("backend-exit", (_e, code) => cb(code)),

@@ -1,6 +1,6 @@
 // Electron main process: owns the window, the Python backend subprocess and the
 // WebSocket bridge to the backend.
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Menu } from "electron";
 import { spawn, ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -202,6 +202,8 @@ async function createWindowAsync(root: string | null) {
 }
 
 app.whenReady().then(() => {
+  // no native menu bar (File/Edit/View/...): the app is fully driven by the UI
+  Menu.setApplicationMenu(null);
   conn = loadConn();
   const args = process.argv.slice(app.isPackaged ? 1 : 2);
   let root: string | null = null;
@@ -211,6 +213,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle("backend-url", () => backendUrl);
   ipcMain.handle("backend-root", () => backendRoot);
+  ipcMain.handle("app-version", () => app.getVersion());
   ipcMain.handle("ws-send", (_e, payload: object) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("backend not connected");
     ws.send(JSON.stringify(payload));

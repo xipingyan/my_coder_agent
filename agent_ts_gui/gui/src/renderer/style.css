@@ -168,6 +168,7 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
 }
 #state-label { flex: 1; }
 #llm-label { color: var(--muted); font-family: monospace; }
+#version-label { color: var(--muted); }
 #server-ctx-btn { font-size: 12px; padding: 1px 6px; }
 #server-ctx-btn.warn { color: var(--warn); }
 #server-ctx-btn.bad { color: var(--error); }
@@ -206,7 +207,7 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
 #ctxmenu .sep { height: 1px; background: #eee; margin: 3px 0; }
 
 /* --------------------------------------------------------------- modal */
-#modal-backdrop {
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.35);
@@ -215,7 +216,17 @@ button.wide { margin: 4px; width: calc(100% - 8px); }
   justify-content: center;
   z-index: 200;
 }
-#modal-backdrop.show { display: flex; }
+.modal-backdrop.show { display: flex; }
+/* the prompt modal stacks on top of the projects dialog */
+.modal-backdrop.stacked { z-index: 220; }
+.modal.prompt { width: 420px; }
+.modal .pinput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font-size: 13px;
+  margin-top: 4px;
+}
 .modal {
   background: #fff;
   border: 1px solid var(--border);

@@ -257,8 +257,8 @@ function chatResult(ok: boolean, text: string) {
   chat.line("  " + short(text, 300), ok ? "c-muted" : "c-error", true);
 }
 
-function renderTurn(t: { prompt: string; task_type: string; messages: any[]; status: string }) {
-  chat.line(`\nYou  [${t.task_type}]`, "c-user");
+function renderTurn(t: { prompt: string; task_type: string; messages: any[]; status: string; created?: number }) {
+  chat.line(`\nYou  [${t.task_type}]${t.created ? "  " + stampOf(t.created) : ""}`, "c-user");
   chat.line(t.prompt);
   for (const m of t.messages) {
     if (m.role === "assistant") {
@@ -376,6 +376,32 @@ document.addEventListener("contextmenu", (e) => {
   if (!(e.target as HTMLElement).closest("#ctxmenu")) hideMenu();
 });
 window.addEventListener("blur", hideMenu);
+
+// Electron has no window.prompt (it silently returns null), so the projects
+// dialog needs its own input modal. It is a separate overlay appended to the
+// body, so it can stack on top of the projects dialog.
+function promptModal(title: string, initial: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const bd = document.createElement("div");
+    bd.className = "modal-backdrop stacked show";
+    bd.innerHTML = `<div class="modal prompt"><div class="head"></div>` +
+      `<div class="body"><input type="text" class="pinput"/></div>` +
+      `<div class="foot"><button class="no">Cancel</button><button class="primary yes">OK</button></div></div>`;
+    bd.querySelector(".head")!.textContent = title;
+    const input = bd.querySelector<HTMLInputElement>(".pinput")!;
+    input.value = initial;
+    document.body.appendChild(bd);
+    input.focus();
+    input.select();
+    const done = (v: string | null) => { bd.remove(); resolve(v); };
+    bd.querySelector(".yes")!.addEventListener("click", () => done(input.value.trim() || null));
+    bd.querySelector(".no")!.addEventListener("click", () => done(null));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") done(input.value.trim() || null);
+      if (e.key === "Escape") done(null);
+    });
+  });
+}
 
 function confirmModal(title: string, text: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -1004,7 +1030,7 @@ function onEvent(ev: AgentEvent) {
     S.block = null;
     thinking.clear();
     S.thinkChars = 0;
-    chat.line(`\nYou  [${d.task_type}]`, "c-user");
+    chat.line(`\nYou  [${d.task_type}]  ${stampOf(ev.ts)}`, "c-user");
     chat.line(d.prompt);
     log(ev, `task type ${d.task_type}`);
     refreshTurnList();
@@ -1015,7 +1041,7 @@ function onEvent(ev: AgentEvent) {
   } else if (k === "content_delta") {
     if (S.block !== ev.agent_id) {
       const who = ev.agent_id === "main" ? "" : ` (${ev.agent_id})`;
-      chat.line(`\nAssistant${who}`, "c-ok b");
+      chat.line(`\nAssistant${who}  ${stampOf(ev.ts)}`, "c-ok b");
       S.block = ev.agent_id;
       S.blockFirst = true;
     }
@@ -1124,9 +1150,12 @@ function onEvent(ev: AgentEvent) {
 }
 
 function log(ev: AgentEvent, text: string, cls = "") {
-  const ts = new Date(ev.ts * 1000);
-  const stamp = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`;
-  activity.line(`${stamp} [${ev.agent_id}] ${ev.event}: ${short(text, 220)}`, cls, true);
+  activity.line(`${stampOf(ev.ts)} [${ev.agent_id}] ${ev.event}: ${short(text, 220)}`, cls, true);
+}
+
+function stampOf(epochSec: number): string {
+  const ts = new Date(epochSec * 1000);
+  return `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`;
 }
 
 // -------------------------------------------------------------------- plan
@@ -1439,7 +1468,7 @@ async function projectsDialog(): Promise<void> {
   modal.querySelector(".add-local")!.addEventListener("click", async () => {
     const dir = await window.api.pickDirectory();
     if (!dir) return;
-    const name = window.prompt("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+    const name = await promptModal("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
     if (!name) return;
     list.push({ name, mode: "local", path: dir });
     saveProjects(list);
@@ -1449,16 +1478,16 @@ async function projectsDialog(): Promise<void> {
   modal.querySelector(".add-remote")!.addEventListener("click", async () => {
     const dir = await browseRemoteDir("");
     if (!dir) return;
-    const name = window.prompt("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
+    const name = await promptModal("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
     if (!name) return;
     list.push({ name, mode: "remote", path: dir });
     saveProjects(list);
     selected = list[list.length - 1];
     render();
   });
-  modal.querySelector(".rename")!.addEventListener("click", () => {
+  modal.querySelector(".rename")!.addEventListener("click", async () => {
     if (!selected) return;
-    const name = window.prompt("New name:", selected.name);
+    const name = await promptModal("New name:", selected.name);
     if (!name) return;
     selected.name = name;
     saveProjects(list);
@@ -1671,6 +1700,8 @@ window.api.onBackendUrl(async () => {
   // from here on, backend-exit / backend-url are handled by the global
   // listeners (banner etc.), so bootDone is set before the first await
   bootDone = true;
+  // version shown at the right end of the status bar
+  window.api.getAppVersion().then((v) => { $("version-label").textContent = `v${v}`; }).catch(() => {});
   $("state-label").textContent = "Starting backend...";
   // the page loads before the Python backend is up: wait for the "backend-url"
   // event (or the "backend-exit" / timeout if it failed to start).

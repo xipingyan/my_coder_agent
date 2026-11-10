@@ -402,6 +402,7 @@ class Server:
                 "prompt": t.prompt,
                 "task_type": t.task_type,
                 "status": t.status,
+                "created": t.created,
                 "messages": _jsonable(t.display_messages()),
             })
         return {"turns": out}

@@ -16,6 +16,7 @@ export interface ReplyMsg {
 export interface Api {
   getBackendUrl: () => Promise<string | null>;
   getBackendRoot: () => Promise<string | null>;
+  getAppVersion: () => Promise<string>;
   onBackendUrl: (cb: (url: string) => void) => void;
   onBackendExit: (cb: (code: number | null) => void) => void;
   send: (payload: object) => Promise<void>;
