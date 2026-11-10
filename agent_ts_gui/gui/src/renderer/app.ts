@@ -1537,9 +1537,8 @@ async function chooseProject() {
 }
 
 $("root-label").style.cursor = "pointer";
-$("root-label").title = "Click to open a different project";
+$("root-label").title = "Click to switch / manage projects";
 $("root-label").addEventListener("click", chooseProject);
-$("projects-btn").addEventListener("click", chooseProject);
 
 // ------------------------------------------------------- resizable splitters
 const SPLIT_DEFAULTS = { left: 260, right: 520, input: 130 };
