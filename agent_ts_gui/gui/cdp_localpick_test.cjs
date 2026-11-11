@@ -15,7 +15,7 @@ const app = spawnApp({ root: "/tmp/proj_a", onLog: (d) => process.stdout.write(`
 
   // wait for boot
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
     if (lbl && lbl.includes("proj_a")) break;
     await wait(500);
   }

@@ -13,8 +13,8 @@ const app = spawnApp({ root: process.env.TEST_ROOT || "/home/xiping/mygitee/my_c
 
   // wait for project to open
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
-    if (lbl && lbl !== "(no project)") break;
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
+    if (lbl && lbl.includes("Coder Agent:")) break;
     await wait(500);
   }
 

@@ -21,8 +21,8 @@ function check(label, ok) {
   // wait for the project to open
   let opened = false;
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
-    if (lbl && lbl !== "(no project)") { opened = true; break; }
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
+    if (lbl && lbl.includes("Coder Agent:")) { opened = true; break; }
     await wait(500);
   }
   check("project opened on boot", opened);

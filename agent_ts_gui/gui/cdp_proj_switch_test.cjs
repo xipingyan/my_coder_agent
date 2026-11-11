@@ -25,9 +25,10 @@ function check(label, ok) {
   const evalJs = cdp.evalJs;
 
   // wait for project A to open
+  // the open project's path is in the title bar (root-label is a static button)
   let opened = false;
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
     if (lbl && (lbl.includes(ROOT_A) || lbl.includes("proj_a"))) { opened = true; break; }
     await wait(500);
   }
@@ -56,7 +57,7 @@ function check(label, ok) {
   await evalJs("document.querySelector('#modal .open').click()");
   let switched = false;
   for (let i = 0; i < 40; i++) {
-    const lbl = await evalJs("document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name').textContent");
     if (lbl && lbl.includes(ROOT_B)) { switched = true; break; }
     await wait(500);
   }
@@ -69,7 +70,7 @@ function check(label, ok) {
   await evalJs(`[...document.querySelectorAll('#modal .projrow')].find(r => r.textContent.includes('proj_a')).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
   let back = false;
   for (let i = 0; i < 40; i++) {
-    const lbl = await evalJs("document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name').textContent");
     if (lbl && lbl.includes(ROOT_A)) { back = true; break; }
     await wait(500);
   }

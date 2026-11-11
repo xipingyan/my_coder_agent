@@ -47,8 +47,8 @@ function check(label, ok) {
     // 2) project opens through the remote connection
     let opened = false;
     for (let i = 0; i < 120; i++) {
-      const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
-      if (lbl && lbl !== "(no project)") { opened = true; break; }
+      const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
+      if (lbl && lbl.includes("Coder Agent:")) { opened = true; break; }
       await wait(500);
     }
     check("project opened via remote server", opened);

@@ -1782,7 +1782,10 @@ async function projectsDialog(): Promise<void> {
   });
 
   modal.querySelector(".add-local")!.addEventListener("click", async () => {
-    const dir = await window.api.pickDirectory();
+    // __pickDirectory is a CDP-test hook (see window.__onEvent); defaults to the
+    // native picker, which a headless test cannot drive.
+    const pick: () => Promise<string | null> = (window as any).__pickDirectory ?? window.api.pickDirectory;
+    const dir = await pick();
     if (!dir) return;
     const name = await promptModal("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
     if (!name) return;

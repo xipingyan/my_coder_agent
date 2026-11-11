@@ -43,11 +43,11 @@ const ts = (label) => console.log(`t=${Date.now() - t0}ms  ${label}`);
     ts("clicked Restart");
   }
 
-  // 4) project opened: root-label no longer "(no project)"
+  // 4) project opened: title bar shows "Coder Agent: <root>"
   let opened = false;
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
-    if (lbl && lbl !== "(no project)") { opened = true; ts(`project opened: ${lbl.trim()}`); break; }
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
+    if (lbl && lbl.includes("Coder Agent:")) { opened = true; ts(`project opened: ${lbl.trim()}`); break; }
     await wait(500);
   }
   if (!opened) ts("project NOT opened within 60s");

@@ -25,14 +25,16 @@ function check(label, ok) {
   const evalJs = cdp.evalJs;
 
   for (let i = 0; i < 120; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
     if (lbl && (lbl.includes(ROOT_A) || lbl.includes("proj_a"))) break;
     await wait(500);
   }
 
   // mock the native folder picker, open the dialog, click "+ Local project..."
   await evalJs(`localStorage.setItem("coder-agent.projects", JSON.stringify([]))`);
-  await evalJs(`window.api.pickDirectory = () => Promise.resolve(${JSON.stringify(ROOT_B)})`);
+  // window.api is a contextBridge proxy: assigning to it silently fails, so the
+  // app exposes a __pickDirectory test hook (see window.__onEvent).
+  await evalJs(`window.__pickDirectory = () => Promise.resolve(${JSON.stringify(ROOT_B)})`);
   await evalJs("document.getElementById('root-label').click()");
   await wait(300);
   await evalJs("document.querySelector('#modal .add-local').click()");
@@ -57,7 +59,7 @@ function check(label, ok) {
   await evalJs("document.querySelector('#modal .open').click()");
   let switched = false;
   for (let i = 0; i < 40; i++) {
-    const lbl = await evalJs("document.getElementById('root-label').textContent");
+    const lbl = await evalJs("document.getElementById('titlebar-name').textContent");
     if (lbl && lbl.includes(ROOT_B)) { switched = true; break; }
     await wait(500);
   }

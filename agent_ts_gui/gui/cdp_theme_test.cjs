@@ -20,8 +20,8 @@ function check(name, cond) {
   // wait for the project to open (S.config is set in openProject; Settings
   // needs it, so we must not open the dialog before this)
   for (let i = 0; i < 150; i++) {
-    const lbl = await evalJs("document.getElementById('root-label') && document.getElementById('root-label').textContent");
-    if (lbl && lbl !== "(no project)") break;
+    const lbl = await evalJs("document.getElementById('titlebar-name') && document.getElementById('titlebar-name').textContent");
+    if (lbl && lbl.includes("Coder Agent:")) break;
     await wait(200);
   }
 
