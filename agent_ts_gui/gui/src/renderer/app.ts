@@ -934,20 +934,22 @@ async function settingsDialog(): Promise<boolean> {
     // model-history datalist instead of crashing the whole dialog
     const modelInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="model"]');
     const providerSel = modelPage.querySelector<HTMLElement>('[data-s="server"][data-k="provider"]');
+    let updateModelDl: (() => void) | null = null;
     if (modelInput && providerSel) {
+      const input = modelInput;
       modelInput.setAttribute("list", "model-dl");
       const modelDl = modelPage.ownerDocument.createElement("datalist");
       modelDl.id = "model-dl";
       modelPage.appendChild(modelDl);
-      function updateModelDl() {
+      updateModelDl = () => {
         const provider = cfg.server?.provider ?? "";
-        const cur = modelInput.value.trim();
+        const cur = input.value.trim();
         const list = modelHistory()[provider] ?? [];
         const opts = cur && !list.includes(cur) ? [cur, ...list] : list;
         modelDl.innerHTML = opts.map((m) => `<option value="${esc(m)}"></option>`).join("");
-      }
+      };
       updateModelDl();
-      providerSel.addEventListener("change", updateModelDl);
+      providerSel.addEventListener("change", () => updateModelDl?.());
     }
 
     const ctxPage = modal.querySelector<HTMLElement>('.page[data-p="context"]')!;
@@ -1128,7 +1130,7 @@ async function settingsDialog(): Promise<boolean> {
       if (r && r.__error) { showMsg(modelPage, false, String(r.__error)); return; }
       const provider = collect().server?.provider ?? "";
       for (const m of r.models ?? []) recordModel(provider, m);
-      updateModelDl();
+      updateModelDl?.();
       showMsg(modelPage, true, `Models:\n${(r.models ?? []).join("\n")}\n\n${r.context_text ?? ""}`);
     });
     ctxPage.querySelector(".detect")!.addEventListener("click", async () => {
@@ -1762,13 +1764,13 @@ async function projectsDialog(): Promise<void> {
   // the container (per-row listeners are lost on re-render and the old
   // double-click handler never fired after the selection re-render).
   listEl.addEventListener("click", (e) => {
-    const row = (e.target as HTMLElement).closest(".projrow");
+    const row = (e.target as HTMLElement).closest<HTMLElement>(".projrow");
     if (!row) return;
     selected = list[Number(row.dataset.idx)] ?? null;
     render();
   });
   listEl.addEventListener("dblclick", (e) => {
-    const row = (e.target as HTMLElement).closest(".projrow");
+    const row = (e.target as HTMLElement).closest<HTMLElement>(".projrow");
     if (!row) return;
     const p = list[Number(row.dataset.idx)];
     if (!p) return;

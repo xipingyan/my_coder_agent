@@ -24,6 +24,7 @@ const SUITES = {
   split: "cdp_split_test.cjs",
   files: "cdp_files_test.cjs",
   theme: "cdp_theme_test.cjs",
+  restart_close: "cdp_restart_close_test.cjs",
   remote: "cdp_remote_test.cjs",
 };
 
@@ -39,7 +40,9 @@ function pick() {
 }
 
 function portListening(port) {
-  try { return execSync(`ss -ltn 2>/dev/null | grep -q :${port}$ && echo up || echo down`, { shell: "/bin/bash" }).toString().trim() === "up"; }
+  // ss pads the local-address column, so match the port at the end of the
+  // trimmed line (":8931$" on the raw line fails on the trailing spaces)
+  try { return execSync(`ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${port}$" && echo up || echo down`, { shell: "/bin/bash" }).toString().trim() === "up"; }
   catch { return false; }
 }
 
@@ -55,7 +58,9 @@ function startRemoteServer() {
     if (portListening(REMOTE_PORT)) return;
     execSync("sleep 0.5");
   }
-  throw new Error(`remote server did not start on :${REMOTE_PORT} (see ${log})`);
+  throw new Error(`remote server did not start on :${REMOTE_PORT} (see ${log}). ` +
+    `If a server from a previous crashed run holds the port, kill it first: ` +
+    `ps -eo pid,cmd | grep "coder_agent.server --port ${REMOTE_PORT}"`);
 }
 
 function stopRemoteServer() {

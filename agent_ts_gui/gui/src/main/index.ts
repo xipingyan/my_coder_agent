@@ -22,6 +22,7 @@ function backendInfo(): { cmd: string; args: string[]; cwd: string } {
   return { cmd: py, args: ["-m", "coder_agent.server"], cwd: dir };
 }
 
+let quitting = false; // set by killBackend(); blocks new backend spawns during shutdown
 let backend: ChildProcess | null = null;
 let backendUrl: string | null = null;
 let backendRoot: string | null = null;
@@ -64,6 +65,13 @@ function startBackend(root: string | null): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(bi.cmd, args, { cwd: bi.cwd, stdio: ["pipe", "pipe", "pipe"] });
     backend = proc;
+    if (quitting) {
+      // the app is shutting down (window closed while a restart was in flight):
+      // never let this process outlive the app, or before-quit blocks forever
+      try { proc.kill("SIGKILL"); } catch { /* ignore */ }
+      proc.once("exit", () => reject(new Error("app is quitting")));
+      return;
+    }
     let settled = false;
     const timer = setTimeout(() => {
       if (!settled) { settled = true; reject(new Error("backend did not start within 30s")); }
@@ -342,7 +350,6 @@ app.whenReady().then(() => {
   });
 });
 
-let quitting = false;
 function killBackend() {
   if (quitting) return;
   quitting = true;

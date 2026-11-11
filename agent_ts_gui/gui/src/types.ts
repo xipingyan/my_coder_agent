@@ -30,6 +30,10 @@ export interface Api {
   restartBackend: (root: string | null) => Promise<void>;
   getConnection: () => Promise<Connection>;
   setConnection: (c: Connection) => Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }>;
+  setNativeTheme: (theme: string) => Promise<void>;
+  winMinimize: () => Promise<void>;
+  winToggleMaximize: () => Promise<boolean>;
+  winClose: () => Promise<void>;
 }
 
 export interface Connection {
