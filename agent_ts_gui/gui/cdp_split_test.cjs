@@ -1,35 +1,12 @@
 // CDP smoke test for resizable splitters.
-const { spawn } = require("child_process");
-const path = require("path");
+const { spawnApp, killApp, getWsUrl, wait } = require("./cdp_test_lib.cjs");
 const WebSocket = require("ws");
 
-const http = require("http");
-const electron = require("electron");
-const proc = spawn(electron, [".", "--no-sandbox", "--remote-debugging-port=9341"], {
-  cwd: __dirname,
-  env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-proc.stdout.on("data", () => {});
-proc.stderr.on("data", () => {});
-
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function getWsUrl() {
-  return new Promise((resolve) => {
-    http.get("http://127.0.0.1:9341/json/version", (res) => {
-      let body = "";
-      res.on("data", (d) => { body += d; });
-      res.on("end", () => {
-        try { resolve(JSON.parse(body).webSocketDebuggerUrl); } catch { resolve(null); }
-      });
-    }).on("error", () => resolve(null));
-  });
-}
+const app = spawnApp({});
 
 (async () => {
   let url = null;
-  for (let i = 0; i < 50; i++) { url = await getWsUrl(); if (url) break; await wait(200); }
+  for (let i = 0; i < 50; i++) { url = await getWsUrl(app.port, "/json/version"); if (url) break; await wait(200); }
   if (!url) throw new Error("no devtools url");
 
   const ws = new WebSocket(url, { perMessageDeflate: false });
@@ -143,6 +120,7 @@ function getWsUrl() {
     && Math.abs(inputAfter - (inputBefore + 40)) < 1
     && Math.abs(reset - 260) < 1;
   console.log(ok ? "SPLIT TEST PASS" : "SPLIT TEST FAIL");
-  proc.kill("SIGTERM");
+  ws.close();
+  await killApp(app);
   process.exit(ok ? 0 : 1);
-})().catch((e) => { console.error(e); proc.kill("SIGTERM"); process.exit(1); });
+})().catch(async (e) => { console.error(e); await killApp(app); process.exit(1); });

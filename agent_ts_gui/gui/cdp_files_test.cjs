@@ -1,11 +1,8 @@
 // Smoke test for the Files tree + Diff view (left "Files" tab, mid Chat/Diff tabs).
-const { spawn } = require("child_process");
-const http = require("http");
+const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const electron = require("electron");
-const WebSocket = require("ws");
 
 // a scratch project with one file, plus a pre-seeded session whose turn t1
 // modified src/mod.txt (snapshot of the original content stored in .agent)
@@ -28,65 +25,21 @@ fs.writeFileSync(path.join(cache, "sessions", sid + ".json"), JSON.stringify({
     ran_commands: false, status: "done", final_text: "", subtasks: [], created: 1 }],
 }));
 
-const proc = spawn(electron, [".", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9347", "--user-data-dir=" + fs.mkdtempSync(path.join(os.tmpdir(), "agent-files-ud-")),
-  "--root", testRoot], {
-  cwd: __dirname,
-  env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-let backendLog = "";
-proc.stdout.on("data", (d) => { backendLog += d; });
-proc.stderr.on("data", (d) => { backendLog += d; });
+const app = spawnApp({ root: testRoot });
+const backendLog = () => app.getLog();
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = false;
 const check = (name, ok, extra = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? "  (" + extra + ")" : ""}`);
   if (!ok) failed = true;
 };
 
-function getWsUrl() {
-  return new Promise((resolve) => {
-    http.get("http://127.0.0.1:9347/json", (res) => {
-      let body = "";
-      res.on("data", (d) => { body += d; });
-      res.on("end", () => {
-        try {
-          const list = JSON.parse(body);
-          const page = list.find((t) => t.type === "page");
-          resolve(page ? page.webSocketDebuggerUrl : null);
-        } catch { resolve(null); }
-      });
-    }).on("error", () => resolve(null));
-  });
-}
-
 (async () => {
-  let url = null;
-  for (let i = 0; i < 100; i++) { url = await getWsUrl(); if (url) break; await wait(200); }
+  const url = await getWsUrl(app.port);
   if (!url) throw new Error("no devtools url");
-  const ws = new WebSocket(url, { perMessageDeflate: false });
-  let id = 0;
-  const pending = new Map();
-  ws.on("message", (buf) => {
-    const msg = JSON.parse(buf);
-    if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-  });
-  const send = (method, params = {}) => new Promise((resolve) => {
-    id += 1;
-    pending.set(id, resolve);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-  await new Promise((r) => ws.on("open", r));
-  // tap all renderer RPC replies (CDP hook) to debug lost responses
-  await send("Runtime.evaluate", { expression: `
-    window.__rpcLog = [];
-    window.api.onReply((m) => window.__rpcLog.push(JSON.stringify(m).slice(0, 120)));
-    true`, returnByValue: true });
-  const evalJs = async (expr) => {
-    const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true });
-    return r.result && r.result.result ? r.result.result.value : undefined;
-  };
+  const cdp = connectCdp(url);
+  await cdp.opened;
+  const evalJs = cdp.evalJs;
 
   // wait for the project to open (tree loaded)
   let opened = false;
@@ -190,10 +143,7 @@ function getWsUrl() {
     await wait(300);
   }
   check("changed file shows del/add diff lines", diffOk);
-  if (!diffOk) {
-    console.log("RPC log:", (await evalJs(`window.__rpcLog.slice(-15)`)).join("\n  "));
-    console.log("backend:", backendLog.slice(-1500));
-  }
+  if (!diffOk) console.log("backend:", backendLog().slice(-1500));
 
   // 5) Chat tab still works: switch back and forth
   await evalJs(`document.querySelector('#mid-tabs .tab[data-midtab="chat"]').click()`);
@@ -208,11 +158,9 @@ function getWsUrl() {
   await wait(500);
   check("tree refresh keeps rows", !!(await evalJs(`document.querySelectorAll('#file-tree .tree-row').length > 0`)));
 
-  ws.close();
-  proc.kill("SIGTERM");
-  await wait(1500);
-  if (proc.exitCode === null) proc.kill("SIGKILL");
+  cdp.close();
+  await killApp(app);
   fs.rmSync(testRoot, { recursive: true, force: true });
   console.log(failed ? "\nRESULT: FAILED" : "\nRESULT: OK");
   process.exit(failed ? 1 : 0);
-})().catch((e) => { console.error(e); proc.kill("SIGKILL"); process.exit(1); });
+})().catch(async (e) => { console.error(e); await killApp(app); process.exit(1); });

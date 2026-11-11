@@ -1,36 +1,8 @@
 // Smoke test: the Projects dialog opens, lists saved projects, and the
 // remote dir browser works against the local (local-server) backend.
-const { spawn } = require("child_process");
-const http = require("http");
-const electron = require("electron");
-const WebSocket = require("ws");
+const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
 
-const proc = spawn(electron, [".", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9342",
-  "--root", process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui"], {
-  cwd: __dirname,
-  env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-proc.stdout.on("data", (d) => process.stdout.write(`[app] ${d}`));
-proc.stderr.on("data", () => {});
-
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function getWsUrl() {
-  return new Promise((resolve) => {
-    http.get("http://127.0.0.1:9342/json", (res) => {
-      let body = "";
-      res.on("data", (d) => { body += d; });
-      res.on("end", () => {
-        try {
-          const list = JSON.parse(body);
-          const page = list.find((t) => t.type === "page");
-          resolve(page ? page.webSocketDebuggerUrl : null);
-        } catch { resolve(null); }
-      });
-    }).on("error", () => resolve(null));
-  });
-}
+const app = spawnApp({ root: process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui", onLog: (d) => process.stdout.write(`[app] ${d}`) });
 
 let failed = false;
 function check(label, ok) {
@@ -39,27 +11,12 @@ function check(label, ok) {
 }
 
 (async () => {
-  let url = null;
-  for (let i = 0; i < 100; i++) { url = await getWsUrl(); if (url) break; await wait(200); }
+  const url = await getWsUrl(app.port);
   if (!url) throw new Error("no devtools url");
 
-  const ws = new WebSocket(url, { perMessageDeflate: false });
-  let id = 0;
-  const pending = new Map();
-  ws.on("message", (buf) => {
-    const msg = JSON.parse(buf);
-    if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-  });
-  const send = (method, params = {}) => new Promise((resolve) => {
-    id += 1;
-    pending.set(id, resolve);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-  await new Promise((r) => ws.on("open", r));
-  const evalJs = async (expr) => {
-    const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-    return r.result && r.result.result ? r.result.result.value : undefined;
-  };
+  const cdp = connectCdp(url);
+  await cdp.opened;
+  const evalJs = cdp.evalJs;
 
   // wait for the project to open
   let opened = false;
@@ -71,7 +28,7 @@ function check(label, ok) {
   check("project opened on boot", opened);
 
   // 1) Projects dialog opens with the expected buttons
-  await evalJs("document.getElementById('projects-btn').click()");
+  await evalJs("document.getElementById('root-label').click()");
   await wait(300);
   const dlg = await evalJs(`JSON.stringify({
     show: !!document.querySelector('#modal-backdrop.show'),
@@ -92,7 +49,7 @@ function check(label, ok) {
   await wait(200);
   const browse = await evalJs(`(async () => {
     // reuse the internal dialog via the button path: open projects, click + Remote project...
-    document.getElementById('projects-btn').click();
+    document.getElementById('root-label').click();
     await new Promise(r => setTimeout(r, 200));
     document.querySelector('#modal .add-remote').click();
     await new Promise(r => setTimeout(r, 1500));
@@ -105,9 +62,7 @@ function check(label, ok) {
   check("remote browser title", b.head.includes("backend machine"));
   check("remote browser lists entries", b.entries.length > 0);
 
-  ws.close();
-  proc.kill("SIGTERM");
-  await wait(1500);
-  if (proc.exitCode === null) proc.kill("SIGKILL");
+  cdp.close();
+  await killApp(app);
   process.exit(failed ? 1 : 0);
-})().catch((e) => { console.error(e); proc.kill("SIGKILL"); process.exit(1); });
+})().catch(async (e) => { console.error(e); await killApp(app); process.exit(1); });

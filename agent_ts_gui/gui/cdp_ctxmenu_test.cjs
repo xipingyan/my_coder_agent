@@ -1,59 +1,15 @@
 // Verify the sessions list: multi-select (ctrl/shift click) + contextmenu shows the menu.
-const { spawn } = require("child_process");
-const http = require("http");
-const electron = require("electron");
-const WebSocket = require("ws");
+const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
 
-const proc = spawn(electron, [".", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=9343",
-  "--root", process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui"], {
-  cwd: __dirname,
-  env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-proc.stdout.on("data", (d) => process.stdout.write(`[app] ${d}`));
-proc.stderr.on("data", (d) => process.stderr.write(`[err] ${d}`));
-
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function getWsUrl() {
-  return new Promise((resolve) => {
-    http.get("http://127.0.0.1:9343/json", (res) => {
-      let body = "";
-      res.on("data", (d) => { body += d; });
-      res.on("end", () => {
-        try {
-          const list = JSON.parse(body);
-          const page = list.find((t) => t.type === "page");
-          resolve(page ? page.webSocketDebuggerUrl : null);
-        } catch { resolve(null); }
-      });
-    }).on("error", () => resolve(null));
-  });
-}
+const app = spawnApp({ root: process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui" });
 
 (async () => {
-  let url = null;
-  for (let i = 0; i < 100; i++) { url = await getWsUrl(); if (url) break; await wait(200); }
+  const url = await getWsUrl(app.port);
   if (!url) throw new Error("no devtools url");
 
-  const ws = new WebSocket(url, { perMessageDeflate: false });
-  let id = 0;
-  const pending = new Map();
-  ws.on("message", (buf) => {
-    const msg = JSON.parse(buf);
-    if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-  });
-  const send = (method, params = {}) => new Promise((resolve) => {
-    id += 1;
-    pending.set(id, resolve);
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-  await new Promise((r) => ws.on("open", r));
-  const evalJs = async (expr) => {
-    const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true });
-    if (r.exceptionDetails) throw new Error("JS exception: " + JSON.stringify(r.exceptionDetails));
-    return r.result && r.result.result ? r.result.result.value : undefined;
-  };
+  const cdp = connectCdp(url);
+  await cdp.opened;
+  const evalJs = cdp.evalJs;
 
   // wait for project to open
   for (let i = 0; i < 120; i++) {
@@ -120,9 +76,7 @@ function getWsUrl() {
   if (left !== n) throw new Error("sessions changed after cancel!");
 
   console.log("CTXMENU TEST OK");
-  ws.close();
-  proc.kill("SIGTERM");
-  await wait(1500);
-  if (proc.exitCode === null) proc.kill("SIGKILL");
+  cdp.close();
+  await killApp(app);
   process.exit(0);
-})().catch((e) => { console.error("FAIL:", e.message); proc.kill("SIGKILL"); process.exit(1); });
+})().catch(async (e) => { console.error("FAIL:", e.message); await killApp(app); process.exit(1); });

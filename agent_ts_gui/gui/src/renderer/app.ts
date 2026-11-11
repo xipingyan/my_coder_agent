@@ -929,20 +929,26 @@ async function settingsDialog(): Promise<boolean> {
       h[provider] = [model, ...list.filter((x) => x !== model)].slice(0, 50);
       try { localStorage.setItem(MODEL_HIST_KEY, JSON.stringify(h)); } catch { /* ignore */ }
     }
-    const modelInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="model"]')!;
-    modelInput.setAttribute("list", "model-dl");
-    const modelDl = modelPage.ownerDocument.createElement("datalist");
-    modelDl.id = "model-dl";
-    modelPage.appendChild(modelDl);
-    function updateModelDl() {
-      const provider = cfg.server?.provider ?? "";
-      const cur = modelInput.value.trim();
-      const list = modelHistory()[provider] ?? [];
-      const opts = cur && !list.includes(cur) ? [cur, ...list] : list;
-      modelDl.innerHTML = opts.map((m) => `<option value="${esc(m)}"></option>`).join("");
+    // guard: if the config has not loaded yet (Settings opened before the
+    // project finished opening) the server fields may be absent - skip the
+    // model-history datalist instead of crashing the whole dialog
+    const modelInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="model"]');
+    const providerSel = modelPage.querySelector<HTMLElement>('[data-s="server"][data-k="provider"]');
+    if (modelInput && providerSel) {
+      modelInput.setAttribute("list", "model-dl");
+      const modelDl = modelPage.ownerDocument.createElement("datalist");
+      modelDl.id = "model-dl";
+      modelPage.appendChild(modelDl);
+      function updateModelDl() {
+        const provider = cfg.server?.provider ?? "";
+        const cur = modelInput.value.trim();
+        const list = modelHistory()[provider] ?? [];
+        const opts = cur && !list.includes(cur) ? [cur, ...list] : list;
+        modelDl.innerHTML = opts.map((m) => `<option value="${esc(m)}"></option>`).join("");
+      }
+      updateModelDl();
+      providerSel.addEventListener("change", updateModelDl);
     }
-    updateModelDl();
-    modelPage.querySelector('[data-s="server"][data-k="provider"]')!.addEventListener("change", updateModelDl);
 
     const ctxPage = modal.querySelector<HTMLElement>('.page[data-p="context"]')!;
     ctxPage.innerHTML =
