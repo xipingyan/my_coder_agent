@@ -65,6 +65,20 @@ class SnapshotStore:
     def changed_files(self, turn_id: str) -> list[str]:
         return sorted(self._manifest(turn_id)["files"])
 
+    def modified_in(self, turn_id: str, rel: str) -> bool:
+        """True if the turn's snapshot records ``rel`` (i.e. the turn modified it)."""
+        return rel in self._manifest(turn_id)["files"]
+
+    def snapshot_content(self, turn_id: str, rel: str) -> Optional[str]:
+        """Content of ``rel`` as it was *before* ``turn_id``; None if not snapshotted."""
+        entry = self._manifest(turn_id)["files"].get(rel)
+        if entry is None:
+            return None
+        if not entry["existed"]:
+            return ""  # the file did not exist before this turn
+        blob = self._turn_dir(turn_id) / "blobs" / entry["blob"]
+        return blob.read_text(encoding="utf-8", errors="replace") if blob.is_file() else ""
+
     # -------------------------------------------------------------- restore
     def restore(self, turn_id: str) -> list[str]:
         """Put every file changed by ``turn_id`` back to its state before that turn."""

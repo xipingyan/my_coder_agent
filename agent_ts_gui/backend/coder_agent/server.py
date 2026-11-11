@@ -168,6 +168,9 @@ class Server:
             "save_approval_policy": self.save_approval_policy,
             "context_strategies": self.context_strategies,
             "answer": self.answer,
+            "file_tree": self.file_tree,
+            "file_content": self.file_content,
+            "turn_file_original": self.turn_file_original,
         }
 
     @property
@@ -398,8 +401,73 @@ class Server:
                 "created": t.created,
                 "active": t.id in active,
                 "index": active.index(t.id) + 1 if t.id in active else 0,
+                "files_changed": s.snapshots.changed_files(t.id),
             })
         return {"turns": out, "session_id": s.id}
+
+    # ------------------------------------------------------- file browser
+    _IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".agent", ".idea", ".vscode", ".cache", "dist", "release"}
+
+    def file_tree(self, p: dict) -> dict:
+        """One level of the project tree (VS Code explorer style, lazy loading)."""
+        e = self._require_engine()
+        root = e.root
+        rel = (p.get("path") or "").strip("/")
+        base = root if not rel else root / rel
+        if not base.is_dir():
+            raise NotADirectoryError(rel or ".")
+        # every file modified by any turn on the active path (dirs are flagged
+        # when they contain one of these, so the tree can auto-expand them)
+        changed_files: set[str] = set()
+        for t in e.session.path():
+            changed_files.update(e.session.snapshots.changed_files(t.id))
+        out: list[dict] = []
+        for entry in sorted(base.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            if entry.name in self._IGNORED_DIRS:
+                continue
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                continue
+            changed = False
+            if is_dir:
+                prefix = (rel + "/" if rel else "") + entry.name + "/"
+                changed = any(c.startswith(prefix) for c in changed_files)
+            else:
+                try:
+                    f = entry.resolve().relative_to(root).as_posix()
+                except ValueError:
+                    f = ""
+                changed = f in changed_files
+            out.append({"name": entry.name, "dir": is_dir, "changed": changed})
+        return {"path": rel, "entries": out}
+
+    def file_content(self, p: dict) -> dict:
+        """Current on-disk content of a project file (read-only view)."""
+        e = self._require_engine()
+        path = (e.root / p["path"]).resolve()
+        if e.root not in path.parents and path != e.root:
+            raise RuntimeError("path outside the project")
+        if not path.is_file():
+            raise RuntimeError(f"file not found: {p['path']}")
+        data = path.read_bytes()
+        if b"\x00" in data[:4096]:
+            raise RuntimeError("binary file")
+        text = data.decode("utf-8", errors="replace")
+        if len(text) > 2_000_000:
+            raise RuntimeError("file too large to display")
+        return {"path": p["path"], "content": text}
+
+    def turn_file_original(self, p: dict) -> dict:
+        """Content of a file *before* ``turn_id``; ``original`` is null if the
+        turn did not modify the file."""
+        e = self._require_engine()
+        s = e.session
+        if p["turn_id"] not in s.turns:
+            raise RuntimeError("unknown turn")
+        rel = p["path"]
+        original = s.snapshots.snapshot_content(p["turn_id"], rel)
+        return {"path": rel, "turn_id": p["turn_id"], "original": original}
 
     def session_summaries(self, p: dict) -> dict:
         e = self._require_engine()

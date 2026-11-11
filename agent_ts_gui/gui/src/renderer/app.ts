@@ -255,6 +255,12 @@ async function openProject(root: string, sessionId: string | null = null) {
   await refreshSessionList();
   refreshContextEstimate();
   refreshServerInfo();
+  S_DIFF.selectedFile = null;
+  S_DIFF.selectedTurn = null;
+  $("diff-file-label").textContent = "";
+  $("diff-body").innerHTML = '<div class="muted">select a file in the Files tab</div>';
+  void refreshFileTree();
+  void refreshDiffTurns();
 }
 
 function resetViews() {
@@ -397,6 +403,209 @@ async function deleteSessions(ids: string[]) {
   } else {
     await refreshSessionList();
   }
+}
+
+// ------------------------------------------------- file tree + diff view
+// Lazy tree of the project (VS Code explorer style): one level per click,
+// loaded through the file_tree RPC (works for local and remote backends).
+const S_DIFF = {
+  turns: [] as any[],
+  selectedTurn: null as string | null,
+  selectedFile: null as string | null,
+};
+
+async function loadTreeLevel(container: HTMLElement, relPath: string, depth: number) {
+  const r = await call("file_tree", { path: relPath });
+  if (r && r.__error) {
+    const err = document.createElement("div");
+    err.className = "tree-err";
+    err.textContent = r.__error;
+    container.appendChild(err);
+    return;
+  }
+  for (const e of r.entries) {
+    const row = document.createElement("div");
+    row.className = "tree-row" + (e.dir ? " dir" : "") + (e.changed ? " changed" : "");
+    row.style.paddingLeft = `${8 + depth * 14}px`;
+    row.title = (relPath ? relPath + "/" : "") + e.name + (e.changed ? "\nmodified in this session" : "");
+    const ico = document.createElement("span");
+    ico.className = "tree-ico";
+    ico.textContent = e.dir ? (e.changed ? "📂" : "📁") : (e.changed ? "✎" : "📄");
+    row.appendChild(ico);
+    const name = document.createElement("span");
+    name.textContent = e.name;
+    row.appendChild(name);
+    if (e.changed) {
+      const dot = document.createElement("span");
+      dot.className = "tree-dot";
+      dot.title = "modified in this session";
+      row.appendChild(dot);
+    }
+    container.appendChild(row);
+    if (e.dir) {
+      // arrow toggles the (lazily created) child container; dirs that contain
+      // changed files are auto-expanded so they are never hidden
+      const arrow = document.createElement("span");
+      arrow.className = "tree-arrow";
+      const open = e.changed;
+      arrow.textContent = open ? "▾" : "▸";
+      row.insertBefore(arrow, ico);
+      const child = document.createElement("div");
+      child.className = "tree-children" + (open ? "" : " hidden");
+      container.appendChild(child);
+      let loaded = false;
+      if (open) {
+        loaded = true;
+        void loadTreeLevel(child, relPath ? relPath + "/" + e.name : e.name, depth + 1);
+      }
+      row.addEventListener("click", async () => {
+        const hidden = child.classList.toggle("hidden");
+        arrow.textContent = hidden ? "▸" : "▾";
+        if (!hidden && !loaded) {
+          loaded = true;
+          await loadTreeLevel(child, relPath ? relPath + "/" + e.name : e.name, depth + 1);
+        }
+      });
+    } else {
+      row.addEventListener("click", () => {
+        for (const el of document.querySelectorAll(".tree-row.sel")) el.classList.remove("sel");
+        row.classList.add("sel");
+        void showFileDiff(relPath ? relPath + "/" + e.name : e.name);
+      });
+    }
+  }
+}
+
+async function refreshFileTree() {
+  const root = $("file-tree");
+  root.innerHTML = "";
+  if (!S.root) { root.innerHTML = '<div class="muted" style="padding:8px">no project open</div>'; return; }
+  await loadTreeLevel(root, "", 0);
+}
+
+// ------------------------------------------------- diff (line-level LCS)
+type DiffRow = { kind: "same" | "add" | "del"; oldNo: number | null; newNo: number | null; text: string };
+
+function diffLines(oldText: string, newText: string): DiffRow[] {
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  // LCS on lines (guard against huge files: fall back to no-match rows)
+  if (a.length * b.length > 4_000_000) {
+    const rows: DiffRow[] = [];
+    a.forEach((t, i) => rows.push({ kind: "del", oldNo: i + 1, newNo: null, text: t }));
+    b.forEach((t, i) => rows.push({ kind: "add", oldNo: null, newNo: i + 1, text: t }));
+    return rows;
+  }
+  const n = a.length, m = b.length;
+  const dp: Uint32Array[] = [];
+  for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const rows: DiffRow[] = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { rows.push({ kind: "same", oldNo: i + 1, newNo: j + 1, text: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ kind: "del", oldNo: i + 1, newNo: null, text: a[i] }); i++; }
+    else { rows.push({ kind: "add", oldNo: null, newNo: j + 1, text: b[j] }); j++; }
+  }
+  while (i < n) { rows.push({ kind: "del", oldNo: i + 1, newNo: null, text: a[i] }); i++; }
+  while (j < m) { rows.push({ kind: "add", oldNo: null, newNo: j + 1, text: b[j] }); j++; }
+  return rows;
+}
+
+function renderDiffRows(rows: DiffRow[]) {
+  const body = $("diff-body");
+  body.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (const r of rows) {
+    const line = document.createElement("div");
+    line.className = "dline " + r.kind;
+    const noOld = document.createElement("span");
+    noOld.className = "dno";
+    noOld.textContent = r.oldNo ? String(r.oldNo) : "";
+    const noNew = document.createElement("span");
+    noNew.className = "dno";
+    noNew.textContent = r.newNo ? String(r.newNo) : "";
+    const txt = document.createElement("span");
+    txt.className = "dtext";
+    txt.textContent = r.text === "" ? " " : r.text;
+    line.append(noOld, noNew, txt);
+    frag.appendChild(line);
+  }
+  body.appendChild(frag);
+}
+
+async function showFileDiff(relPath: string) {
+  S_DIFF.selectedFile = relPath;
+  switchMidTab("diff");
+  $("diff-file-label").textContent = relPath;
+  const body = $("diff-body");
+  body.innerHTML = '<div class="muted">loading...</div>';
+  const cur = await call("file_content", { path: relPath });
+  if (cur && cur.__error) { body.innerHTML = `<div class="c-error">${esc(cur.__error)}</div>`; return; }
+  if (!S_DIFF.selectedTurn) {
+    // no turn modified any file yet: plain view of the current content
+    body.innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "diff-note";
+    note.textContent = "no turn has modified this file yet - showing current content";
+    body.appendChild(note);
+    const pre = document.createElement("pre");
+    pre.className = "dplain";
+    pre.textContent = cur.content;
+    body.appendChild(pre);
+    return;
+  }
+  const orig = await call("turn_file_original", { turn_id: S_DIFF.selectedTurn, path: relPath });
+  if (orig && orig.__error) { body.innerHTML = `<div class="c-error">${esc(orig.__error)}</div>`; return; }
+  if (orig.original === null) {
+    // the selected turn did not modify this file: plain view
+    body.innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "diff-note";
+    note.textContent = "not modified by the selected turn - showing current content";
+    body.appendChild(note);
+    const pre = document.createElement("pre");
+    pre.className = "dplain";
+    pre.textContent = cur.content;
+    body.appendChild(pre);
+    return;
+  }
+  renderDiffRows(diffLines(orig.original, cur.content));
+}
+
+async function refreshDiffTurns() {
+  const sel = $("diff-turn-select") as HTMLSelectElement;
+  const r = await call("session_turns");
+  if (!r || r.__error) return;
+  S_DIFF.turns = r.turns;
+  const prev = S_DIFF.selectedTurn;
+  sel.innerHTML = "";
+  const withFiles = r.turns.filter((t: any) => (t.files_changed ?? []).length);
+  for (const t of withFiles) {
+    const opt = document.createElement("option");
+    opt.value = t.id;
+    opt.textContent = t.active ? `${t.index}. ${short(t.prompt, 40)}` : `(branch) ${short(t.prompt, 36)}`;
+    sel.appendChild(opt);
+  }
+  if (!withFiles.length) {
+    sel.innerHTML = "<option>(no file changes yet)</option>";
+    S_DIFF.selectedTurn = null;
+    $("diff-body").innerHTML = '<div class="muted">no turn has modified any file yet</div>';
+    return;
+  }
+  const last = withFiles[withFiles.length - 1];
+  S_DIFF.selectedTurn = withFiles.some((t: any) => t.id === prev) ? prev : last.id;
+  sel.value = S_DIFF.selectedTurn!;
+  if (S_DIFF.selectedFile) void showFileDiff(S_DIFF.selectedFile);
+}
+
+function switchMidTab(name: string) {
+  const btn = document.querySelector(`#mid-tabs .tab[data-midtab="${name}"]`) as HTMLElement;
+  btn?.click();
 }
 
 // ------------------------------------------------- context menu + modal
@@ -1166,6 +1375,8 @@ function onEvent(ev: AgentEvent) {
     refreshTurnList();
     refreshSessionList();
     refreshServerInfo();
+    void refreshFileTree();
+    void refreshDiffTurns();
   } else if (k === "agent_finished") {
     log(ev, `${d.status} after ${d.steps} step(s)`);
   } else if (k === "plan_created" || k === "plan_started" || k === "subtask_started" || k === "subtask_finished" || k === "plan_finished") {
@@ -1191,6 +1402,8 @@ function onEvent(ev: AgentEvent) {
       await refreshTurnList();
       await refreshSessionList();
       refreshContextEstimate();
+      await refreshFileTree();
+      await refreshDiffTurns();
     })();
   } else if (k === "approval_requested") {
     log(ev, `approval requested: ${d.title ?? d.kind}`, "c-warn");
@@ -1278,6 +1491,24 @@ function bindTabs(barId: string, pagePrefix: string) {
 }
 bindTabs("left-tabs", "tab-");
 bindTabs("right-tabs", "tab-");
+// mid pane: Chat / Diff views
+{
+  const bar = $("mid-tabs");
+  bar.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      bar.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const name = (btn as HTMLElement).dataset.midtab!;
+      $("chat").classList.toggle("hidden", name !== "chat");
+      $("diff-view").classList.toggle("hidden", name !== "diff");
+    });
+  });
+}
+$("tree-refresh-btn").addEventListener("click", () => void refreshFileTree());
+($("diff-turn-select") as HTMLSelectElement).addEventListener("change", (e) => {
+  S_DIFF.selectedTurn = (e.target as HTMLSelectElement).value;
+  if (S_DIFF.selectedFile) void showFileDiff(S_DIFF.selectedFile);
+});
 
 function switchLeftTab(name: string) {
   const btn = document.querySelector(`#left-tabs .tab[data-tab="${name}"]`) as HTMLElement;
@@ -1372,6 +1603,12 @@ $("new-session-btn").addEventListener("click", async () => {
   await refreshTurnList();
   await refreshSessionList();
   refreshContextEstimate();
+  S_DIFF.selectedFile = null;
+  S_DIFF.selectedTurn = null;
+  $("diff-file-label").textContent = "";
+  $("diff-body").innerHTML = '<div class="muted">select a file in the Files tab</div>';
+  void refreshFileTree();
+  void refreshDiffTurns();
   switchLeftTab("turns");
 });
 // window controls (frameless window: the page draws its own title bar)
