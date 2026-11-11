@@ -6,8 +6,15 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div id="titlebar">
+    <span id="titlebar-name">Coder Agent</span>
+    <span class="flex1"></span>
+    <button id="win-min" title="Minimize">&#8722;</button>
+    <button id="win-max" title="Maximize / restore">&#9633;</button>
+    <button id="win-close" title="Close">&#10005;</button>
+  </div>
   <div id="toolbar">
-    <span id="root-label" class="root">(no project)</span>
+    <button id="root-label" title="Click to switch / manage projects">Project</button>
     <span class="sep"></span>
     <label>Task type: <select id="task-combo"><option>(auto)</option></select></label>
     <label>Thinking effort: <select id="effort-combo">

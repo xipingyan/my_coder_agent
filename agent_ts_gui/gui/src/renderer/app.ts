@@ -4,6 +4,27 @@ import type { AgentEvent, ReplyMsg } from "../types";
 // ------------------------------------------------------------------ helpers
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+// ------------------------------------------------------------------- theme
+const THEME_KEY = "agent_ts_gui.theme";
+const THEMES = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "solarized", label: "Solarized Light" },
+] as const;
+type ThemeId = (typeof THEMES)[number]["id"];
+
+function currentTheme(): ThemeId {
+  const t = localStorage.getItem(THEME_KEY);
+  return THEMES.some((x) => x.id === t) ? (t as ThemeId) : "light";
+}
+function applyTheme(id: ThemeId) {
+  if (id === "light") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = id;
+  // native window title bar follows the theme too (dark only)
+  void window.api.setNativeTheme(id);
+}
+applyTheme(currentTheme());
+
 function short(text: string, n: number): string {
   const t = String(text).replace(/\s+/g, " ");
   return t.length <= n ? t : t.slice(0, n - 1) + "…";
@@ -221,9 +242,10 @@ async function openProject(root: string, sessionId: string | null = null) {
     rememberProject(saved.name, saved.mode, saved.path);
   }
   setLastProjectName(saved.name);
-  $("root-label").textContent = ` Project: ${saved ? saved.name + "  " : ""}${r.root} `;
+  // the open project's path lives in the title bar, not on the Project button
+  $("titlebar-name").textContent = `Coder Agent: ${r.root}`;
   $("root-label").title = `${saved ? saved.name + " (" + saved.mode + ")\n" : ""}${r.root}`;
-  document.title = `Coder Agent - ${saved ? saved.name : r.root.split(/[\\/]/).pop()}`;
+  document.title = `Coder Agent: ${r.root}`;
   ($("effort-combo") as HTMLSelectElement).value = S.effort;
   window.api.setLastProject(r.root);
   reloadTaskTypes();
@@ -630,12 +652,12 @@ async function settingsDialog(): Promise<boolean> {
   const strategies: string[] = (strategiesR && !strategiesR.__error) ? strategiesR.strategies : ["summarize", "truncate"];
   return new Promise((resolve) => {
     const modal = $("modal");
-    modal.className = "modal wide";
+    modal.className = "modal wide anchored";
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Connection</button><button class="close-x" title="Close">&#10005;</button></div>` +
-      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div><div class="page" data-p="connection"></div></div>` +
+      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Connection</button><button data-p="appearance">Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
+      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div><div class="page" data-p="connection"></div><div class="page" data-p="appearance"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
 
@@ -727,7 +749,7 @@ async function settingsDialog(): Promise<boolean> {
     pPage.innerHTML =
       `<div class="toprow"><select class="ptype"></select><button class="pnew">New type...</button><button class="prevert">Revert to default</button></div>` +
       `<textarea class="code"></textarea>` +
-      `<div class="tip" style="font-size:11px;color:#888;margin-top:6px">Front-matter keys: name, description, keywords, globs, effort, tools. Saved to the user prompts folder; a project can override in &lt;project&gt;/.agent/prompts/.</div>`;
+      `<div class="tip" style="font-size:11px;color:var(--text-soft2);margin-top:6px">Front-matter keys: name, description, keywords, globs, effort, tools. Saved to the user prompts folder; a project can override in &lt;project&gt;/.agent/prompts/.</div>`;
     const pType = pPage.querySelector(".ptype") as HTMLSelectElement;
     const pEdit = pPage.querySelector("textarea") as HTMLTextAreaElement;
     let pCurrent: string | null = null;
@@ -767,7 +789,7 @@ async function settingsDialog(): Promise<boolean> {
 
     // ---- approval tab
     const aPage = modal.querySelector<HTMLElement>('.page[data-p="approval"]')!;
-    aPage.innerHTML = `<div class="apath" style="font-size:12px;color:#555;margin-bottom:6px"></div><textarea class="code"></textarea>`;
+    aPage.innerHTML = `<div class="apath" style="font-size:12px;color:var(--text-soft);margin-bottom:6px"></div><textarea class="code"></textarea>`;
     const aEdit = aPage.querySelector("textarea") as HTMLTextAreaElement;
     let approvalText = "";
     void (async () => {
@@ -789,7 +811,7 @@ async function settingsDialog(): Promise<boolean> {
       `</fieldset>` +
       `<div class="btnrow"><button class="c-apply">Apply &amp; reconnect</button></div>` +
       `<div class="msg"></div>` +
-      `<div class="tip" style="font-size:11px;color:#888">Local mode: the backend runs on this machine and is started automatically. ` +
+      `<div class="tip" style="font-size:11px;color:var(--text-soft2)">Local mode: the backend runs on this machine and is started automatically. ` +
       `Remote mode: run "coder-agent-server --host 0.0.0.0 --port &lt;port&gt; --token &lt;secret&gt;" on the server machine, ` +
       `then connect here. One server serves one GUI; the project paths are on the server machine. ` +
       `The connection is saved in this app's user data and used at next start.</div>`;
@@ -820,6 +842,24 @@ async function settingsDialog(): Promise<boolean> {
       }
     });
 
+    // ---- appearance tab (GUI-local; applied immediately, persisted in localStorage)
+    const apPage = modal.querySelector<HTMLElement>('.page[data-p="appearance"]')!;
+    apPage.innerHTML =
+      `<fieldset class="grp"><legend>Theme</legend>` +
+      `<div class="field"><span class="lbl">theme</span><select class="theme-sel" style="flex:1;min-width:0">` +
+      THEMES.map((t) => `<option value="${t.id}">${t.label}</option>`).join("") +
+      `</select></div>` +
+      `</fieldset>` +
+      `<div class="tip" style="font-size:11px;color:var(--text-soft2)">Applies immediately and is remembered for the next start. ` +
+      `Light = the original look, Dark = VS Code style, Solarized Light = warm cream tones.</div>`;
+    const themeSel = apPage.querySelector(".theme-sel") as HTMLSelectElement;
+    themeSel.value = currentTheme();
+    themeSel.addEventListener("change", () => {
+      const id = themeSel.value as ThemeId;
+      applyTheme(id);
+      localStorage.setItem(THEME_KEY, id);
+    });
+
     // ---- tabs
     modal.querySelectorAll(".settings .tabs button[data-p]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -827,6 +867,7 @@ async function settingsDialog(): Promise<boolean> {
         (b as HTMLElement).classList.add("active");
         const name = (b as HTMLElement).dataset.p!;
         modal.querySelectorAll(".settings .page").forEach((pg) => pg.classList.toggle("active", (pg as HTMLElement).dataset.p === name));
+        (modal.querySelector(".settings .pages") as HTMLElement).scrollTop = 0;
       });
     });
 
@@ -1333,6 +1374,14 @@ $("new-session-btn").addEventListener("click", async () => {
   refreshContextEstimate();
   switchLeftTab("turns");
 });
+// window controls (frameless window: the page draws its own title bar)
+$("win-min").addEventListener("click", () => void window.api.winMinimize());
+$("win-close").addEventListener("click", () => void window.api.winClose());
+$("win-max").addEventListener("click", async () => {
+  const maxed = await window.api.winToggleMaximize();
+  ($("win-max") as HTMLButtonElement).textContent = maxed ? "\u25A1" : "\u25A0";
+});
+
 $("settings-btn").addEventListener("click", () => {
   if (S.busy) { chat.line("\n[settings disabled while a turn is running]", "c-muted"); return; }
   void settingsDialog().then((saved) => { if (saved) chat.line("\n[settings saved]", "c-ok"); });
@@ -1452,7 +1501,7 @@ async function projectsDialog(): Promise<void> {
     `<div class="btnrow"><button class="add-local">+ Local project...</button>` +
     `<button class="add-remote">+ Remote project...</button>` +
     `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
-    `<div class="tip" style="font-size:11px;color:#888">Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). Projects are remembered by name.</div></div>` +
+    `<div class="tip" style="font-size:11px;color:var(--text-soft2)">Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). Projects are remembered by name.</div></div>` +
     `<div class="foot"><button class="open">Open</button><span class="flex1"></span><button class="primary yes">Close</button></div>`;
   const listEl = modal.querySelector(".projlist")!;
   const msg = modal.querySelector(".msg")!;
