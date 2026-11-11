@@ -190,7 +190,8 @@ option { color: var(--text); background: var(--panel); }
 /* scrollbars (themed) */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 5px; }
+/* 蓝色填充占满整个 10px 轨道：透明边框 + background-clip，轨道尺寸不变 */
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 /* -------------------------------------------------------------- layout */
@@ -212,7 +213,11 @@ option { color: var(--text); background: var(--panel); }
   margin: 2px 0;
   cursor: row-resize;
 }
-.splitter:hover, .splitter.dragging { background: var(--splitter-hover); }
+/* 蓝色填充向两侧各扩 2px（outline 不影响布局，6px 命中区不变） */
+.splitter:hover, .splitter.dragging {
+  background: var(--splitter-hover);
+  outline: 2px solid var(--splitter-hover);
+}
 /* while dragging: disable selection and text cursors globally */
 body.resizing { cursor: col-resize !important; user-select: none; }
 body.resizing * { cursor: col-resize !important; }
