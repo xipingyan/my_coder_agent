@@ -121,7 +121,7 @@ function call(method: string, params: Record<string, any> = {}): Promise<any> {
 
 // ------------------------------------------------------------------- status
 const STATE_TEXT: Record<string, string> = {
-  waiting_model: "Waiting for model",
+  waiting_model: "Waiting",
   running_tool: "Running tool",
   waiting_user: "Waiting for your approval",
   idle: "Idle",
