@@ -20,8 +20,6 @@ function currentTheme(): ThemeId {
 function applyTheme(id: ThemeId) {
   if (id === "light") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = id;
-  // native window title bar follows the theme too (dark only)
-  void window.api.setNativeTheme(id);
 }
 applyTheme(currentTheme());
 
