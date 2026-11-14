@@ -5,6 +5,14 @@ __pycache__
 node_modules/
 gui/dist/
 gui/release/
-gui/build-resources/
+# build-resources: only the packaged backend binary is a build artifact;
+# the app icon sources are committed
+gui/build-resources/backend/
+gui/build-resources/*
+!gui/build-resources/icon.svg
+!gui/build-resources/icon-128.png
+!gui/build-resources/icon-512.png
+!gui/build-resources/icon.ico
+!gui/build-resources/make_icons.py
 backend/dist/
 .agent
