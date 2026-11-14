@@ -1,6 +1,6 @@
 // Electron main process: owns the window, the Python backend subprocess and the
 // WebSocket bridge to the backend.
-import { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, Menu } from "electron";
 import { spawn, ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -222,10 +222,6 @@ app.whenReady().then(() => {
   if (i >= 0 && args[i + 1]) root = args[i + 1];
   createWindowAsync(root);
 
-  ipcMain.handle("set-native-theme", (_e, theme: string) => {
-    // theme: "light" | "dark" | "solarized". solarized is a light theme.
-    nativeTheme.themeSource = theme === "dark" ? "dark" : "light";
-  });
   ipcMain.handle("win-minimize", () => window?.minimize());
   ipcMain.handle("win-toggle-maximize", () => {
     if (!window) return false;
