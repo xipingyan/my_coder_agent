@@ -36,6 +36,8 @@ First time only, set up the two environments:
 ```bash
 # backend (Python venv)
 cd backend && python3 -m venv .venv && .venv/bin/pip install -e .
+# release.sh need pyinstaller 
+pip install pyinstaller 
 
 # gui (Node 20+, via nvm)
 cd gui && npm install

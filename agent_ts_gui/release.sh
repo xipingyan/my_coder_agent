@@ -14,6 +14,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "==> building backend standalone executable"
+# PyInstaller is a build-time tool, not a runtime dependency, so it may be
+# missing from a freshly created venv.
+if ! backend/.venv/bin/python -m PyInstaller --version >/dev/null 2>&1; then
+    echo "PyInstaller not found in backend/.venv, installing..."
+    backend/.venv/bin/python -m pip install pyinstaller
+fi
 backend/.venv/bin/python backend/build_standalone.py gui/build-resources/backend
 ls -l gui/build-resources/backend
 
