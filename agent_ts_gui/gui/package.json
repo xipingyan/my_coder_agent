@@ -33,14 +33,20 @@
       {
         "from": "build-resources/backend",
         "to": "backend"
+      },
+      {
+        "from": "build-resources/icon-512.png",
+        "to": "icon.png"
       }
     ],
     "linux": {
       "target": ["AppImage", "dir"],
-      "category": "Development"
+      "category": "Development",
+      "icon": "build-resources/icon-512.png"
     },
     "win": {
-      "target": ["nsis", "dir"]
+      "target": ["nsis", "dir"],
+      "icon": "build-resources/icon.ico"
     },
     "artifactName": "${name}-${version}.${ext}",
     "nsis": {

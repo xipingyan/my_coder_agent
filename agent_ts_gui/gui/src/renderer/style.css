@@ -153,6 +153,7 @@ body {
   border-radius: 3px;
 }
 #titlebar button:hover { background: var(--hover-strong); color: var(--text); }
+#titlebar button svg { display: block; }
 #win-close:hover { background: var(--error); color: #fff; }
 
 /* ------------------------------------------------------------- toolbar */

@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld("api", {
   setConnection: (c: { mode: string; host: string; port: number; token: string }): Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }> => ipcRenderer.invoke("set-connection", c),
   winMinimize: (): Promise<void> => ipcRenderer.invoke("win-minimize"),
   winToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("win-toggle-maximize"),
+  winIsMaximized: (): Promise<boolean> => ipcRenderer.invoke("win-is-maximized"),
   winClose: (): Promise<void> => ipcRenderer.invoke("win-close"),
 });

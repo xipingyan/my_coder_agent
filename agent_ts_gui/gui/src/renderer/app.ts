@@ -1620,9 +1620,21 @@ $("new-session-btn").addEventListener("click", async () => {
 // window controls (frameless window: the page draws its own title bar)
 $("win-min").addEventListener("click", () => void window.api.winMinimize());
 $("win-close").addEventListener("click", () => void window.api.winClose());
+// window maximize/restore icons: single square (maximize) and the VS Code-style
+// "restore" glyph - two overlapping squares (front one filled with the panel
+// color so the overlap reads as a shadow/ghost of the back window).
+const ICON_MAX = '<svg width="12" height="12" viewBox="0 0 16 16" style="display:block"><rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+const ICON_RESTORE = '<svg width="12" height="12" viewBox="0 0 16 16" style="display:block">'
+  + '<rect x="5" y="2.5" width="8.5" height="8.5" fill="none" stroke="currentColor" stroke-width="1.3"/>'
+  + '<rect x="2.5" y="5" width="8.5" height="8.5" fill="var(--panel)" stroke="currentColor" stroke-width="1.3"/></svg>';
+function setMaxIcon(maxed: boolean) {
+  const b = $("win-max") as HTMLButtonElement;
+  b.innerHTML = maxed ? ICON_RESTORE : ICON_MAX;
+  b.title = maxed ? "Restore" : "Maximize";
+}
+void window.api.winIsMaximized().then(setMaxIcon);
 $("win-max").addEventListener("click", async () => {
-  const maxed = await window.api.winToggleMaximize();
-  ($("win-max") as HTMLButtonElement).textContent = maxed ? "\u25A1" : "\u25A0";
+  setMaxIcon(await window.api.winToggleMaximize());
 });
 
 $("settings-btn").addEventListener("click", () => {

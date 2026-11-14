@@ -32,6 +32,7 @@ export interface Api {
   setConnection: (c: Connection) => Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }>;
   winMinimize: () => Promise<void>;
   winToggleMaximize: () => Promise<boolean>;
+  winIsMaximized: () => Promise<boolean>;
   winClose: () => Promise<void>;
 }
 

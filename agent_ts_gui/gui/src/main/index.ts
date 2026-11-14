@@ -164,11 +164,20 @@ function lastProject(): string | null {
   return null;
 }
 
+// App icon: in dev the repo's build-resources/icon-128.png; in a packaged app
+// the same file shipped as resources/icon.png (see electron-builder extraResources).
+function appIcon(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "icon.png")
+    : path.resolve(__dirname, "../../build-resources/icon-128.png");
+}
+
 async function createWindowAsync(root: string | null) {
   window = new BrowserWindow({
     width: 1500,
     height: 900,
     title: "Coder Agent",
+    icon: appIcon(),
     // frameless: the page draws its own title bar so it follows the app theme
     // (the native title bar follows the OS theme and cannot be themed on Linux)
     frame: false,
@@ -229,6 +238,7 @@ app.whenReady().then(() => {
     else window.maximize();
     return window.isMaximized();
   });
+  ipcMain.handle("win-is-maximized", () => window?.isMaximized() ?? false);
   ipcMain.handle("win-close", () => window?.close());
   ipcMain.handle("backend-url", () => backendUrl);
   ipcMain.handle("backend-root", () => backendRoot);
