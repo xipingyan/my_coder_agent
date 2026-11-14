@@ -41,6 +41,14 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -e .
 cd gui && npm install
 ```
 
+国内需要mirror才能下载。在你的项目根目录（即 package.json 所在的 gui 文件夹）创建或编辑 .npmrc 文件。
+
+写入以下内容：
+```
+registry=https://registry.npmmirror.com
+electron_mirror=https://npmmirror.com/mirrors/electron/
+```
+
 ## Status (phased build)
 
 - [x] **Phase 0** — scaffold: Electron+TS app, Python backend subprocess, WS handshake
