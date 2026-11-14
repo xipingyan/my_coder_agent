@@ -18,9 +18,9 @@ echo ==^> collecting server artifact
 cd ..
 for /f "delims=" %%v in ('node -p "require('./gui/package.json').version"') do set VER=%%v
 rem unpacked runnable binary (release\coder-agent-<ver>-win)
-if exist "gui\release\coder-agent-%VER%-win" rmdir /s /q "gui\release\coder-agent-%VER%-win"
-move "gui\release\win-unpacked" "gui\release\coder-agent-%VER%-win" >nul
-copy gui\build-resources\backend\coder-agent-server.exe "gui\release\coder-agent-server-%VER%.win.exe"
+if exist "release\coder-agent-%VER%-win" rmdir /s /q "release\coder-agent-%VER%-win"
+move "release\win-unpacked" "release\coder-agent-%VER%-win" >nul
+copy gui\build-resources\backend\coder-agent-server.exe "release\coder-agent-server-%VER%.win.exe"
 (
 echo @echo off
 echo rem Coder Agent server launcher (Windows).
@@ -36,7 +36,9 @@ echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT%
 echo ) else (
 echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT% --token %TOKEN%
 echo )
-) > "gui\release\coder-agent-server-%VER%.win.bat"
+) > "release\coder-agent-server-%VER%.win.bat"
+rem usage guide for the end user
+copy /y guide_release.txt "release\guide.txt" >nul
 
-echo ==^> done, artifacts in gui\release\
-dir gui\release
+echo ==^> done, artifacts in release\
+dir release

@@ -82,10 +82,10 @@ locates and spawns it automatically (see `gui/src/main/index.ts:backendInfo`).
 cd backend && python3 -m venv .venv && .venv/bin/pip install -e . pyinstaller
 
 # Linux (build on Linux x86_64)
-./release.sh           # -> gui/release/coder-agent-<ver>.AppImage
+./release.sh           # -> release/coder-agent-<ver>.AppImage
 
 # Windows (build on Windows; PyInstaller and NSIS cannot cross-compile)
-release.bat            # -> gui/release/coder-agent-<ver>.exe
+release.bat            # -> release/coder-agent-<ver>.exe
 ```
 
 `release.sh` takes no arguments — it always builds the Linux AppImage.

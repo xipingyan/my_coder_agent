@@ -2,7 +2,7 @@
 # Build the Linux AppImage for the Coder Agent GUI.
 #
 # Usage:
-#   ./release.sh   # -> gui/release/coder-agent-<ver>.AppImage
+#   ./release.sh   # -> release/coder-agent-<ver>.AppImage
 #
 # Windows: use release.bat (on Windows; PyInstaller cannot cross-compile).
 #
@@ -30,13 +30,14 @@ npm run dist:linux
 echo "==> collecting server artifact"
 cd ..
 VER=$(node -p "require('./gui/package.json').version")
-mkdir -p gui/release
+OUTDIR=release
+mkdir -p "$OUTDIR"
 # unpacked runnable binary (release/coder-agent-<ver>-linux)
-cp -r "gui/release/linux-unpacked" "gui/release/coder-agent-${VER}-linux"
-rm -rf gui/release/linux-unpacked
-cp gui/build-resources/backend/coder-agent-server "gui/release/coder-agent-server-${VER}.linux"
+cp -r "$OUTDIR/linux-unpacked" "$OUTDIR/coder-agent-${VER}-linux"
+rm -rf "$OUTDIR/linux-unpacked"
+cp gui/build-resources/backend/coder-agent-server "$OUTDIR/coder-agent-server-${VER}.linux"
 # plain server launcher: run it on the server machine, point the GUI at host:port
-cat > "gui/release/coder-agent-server-${VER}.linux.sh" <<'EOF'
+cat > "$OUTDIR/coder-agent-server-${VER}.linux.sh" <<'EOF'
 #!/usr/bin/env bash
 # Coder Agent server launcher (Linux).
 # Usage: <this script> [port] [token]
@@ -49,8 +50,10 @@ ARGS=(--host 0.0.0.0 --port "$PORT")
 [ -n "$TOKEN" ] && ARGS+=(--token "$TOKEN")
 exec ./__SERVER_BIN__ "${ARGS[@]}"
 EOF
-sed -i "s/__SERVER_BIN__/coder-agent-server-${VER}.linux/" "gui/release/coder-agent-server-${VER}.linux.sh"
-chmod +x "gui/release/coder-agent-server-${VER}.linux" "gui/release/coder-agent-server-${VER}.linux.sh"
+sed -i "s/__SERVER_BIN__/coder-agent-server-${VER}.linux/" "$OUTDIR/coder-agent-server-${VER}.linux.sh"
+chmod +x "$OUTDIR/coder-agent-server-${VER}.linux" "$OUTDIR/coder-agent-server-${VER}.linux.sh"
+# usage guide for the end user
+cp guide_release.txt "$OUTDIR/guide.txt"
 
-echo "==> done, artifacts in gui/release/"
-ls -l gui/release
+echo "==> done, artifacts in release/"
+ls -l "$OUTDIR"

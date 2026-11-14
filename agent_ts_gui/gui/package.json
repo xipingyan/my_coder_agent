@@ -27,7 +27,7 @@
     "appId": "local.coderagent.gui",
     "productName": "Coder Agent",
     "directories": {
-      "output": "release"
+      "output": "../release"
     },
     "extraResources": [
       {

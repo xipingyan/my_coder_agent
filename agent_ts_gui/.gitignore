@@ -4,7 +4,7 @@ __pycache__
 *.egg-info/
 node_modules/
 gui/dist/
-gui/release/
+release/
 # build-resources: only the packaged backend binary is a build artifact;
 # the app icon sources are committed
 gui/build-resources/backend/

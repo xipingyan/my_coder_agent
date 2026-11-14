@@ -1,0 +1,91 @@
+Coder Agent — 发布版使用指南
+================================
+
+本目录（release/）是 Coder Agent 的发布产物。客户机器上【不需要】安装
+Python、Node 等任何环境，程序是自包含的。
+
+一、目录内容
+------------
+Linux 版（由 ./release.sh 生成）:
+  coder-agent-<ver>.AppImage            GUI 主程序（自包含，双击即可运行）
+  coder-agent-<ver>-linux/              解包版（不方便用 AppImage 的机器可直接运行里面的 coder-agent）
+  coder-agent-server-<ver>.linux        独立后端（仅"远程服务器部署"方式需要，单机使用可忽略）
+  coder-agent-server-<ver>.linux.sh     独立后端启动脚本（同上）
+  guide.txt                             本说明
+
+Windows 版（在 Windows 上由 release.bat 生成）:
+  coder-agent-<ver>.exe                 NSIS 安装包
+  coder-agent-<ver>-win\                解包版（免安装，直接运行里面的 coder-agent.exe）
+  coder-agent-server-<ver>.win.exe      独立后端（单机使用可忽略）
+  coder-agent-server-<ver>.win.bat      独立后端启动脚本（同上）
+
+二、快速开始（单机模式，推荐）
+-----------------------------
+1. 运行 GUI:
+   - Linux:
+       chmod +x coder-agent-<ver>.AppImage
+       ./coder-agent-<ver>.AppImage
+       （若 AppImage 被系统限制，可加参数 --appimage-extract-and-run，
+        或直接使用 coder-agent-<ver>-linux/coder-agent）
+
+   注意: AppImage 依赖 FUSE。较新的发行版（如 Ubuntu 22.04+）默认不带
+   libfuse2，首次运行报 "Could not load FUSE library" 或 "fuse:
+   device not found" 时，需要先安装:
+       sudo apt-get install libfuse2
+   （Debian 同理; 其他发行版包名可能不同，如 dnf install fuse-libs）
+   没有 root 权限或无法安装 FUSE 的机器，请改用解包版
+   coder-agent-<ver>-linux/coder-agent 直接运行。
+   - Windows:
+       运行 coder-agent-<ver>.exe 按提示安装（可选安装目录），
+       然后从开始菜单启动 "Coder Agent"；
+       或免安装: 直接运行 coder-agent-<ver>-win\coder-agent.exe
+
+2. 首次启动界面会显示 "Starting backend..."，后端首次启动需要几秒，属正常现象。
+
+3. 选择项目: 点击工具栏上的项目标签，选择要处理的代码项目目录。
+
+4. 配置 LLM: 打开 设置(Settings)，配置模型提供商（provider）、模型名和
+   API Key（或本机 OpenAI 兼容服务地址，如 Ollama / llama.cpp）。
+
+5. 开始使用: 在输入框输入任务（如"修复这个模块的编译错误"），发送即可。
+   执行过程中界面会实时显示 agent 的思考、工具调用和输出；
+   涉及危险操作（写文件、执行命令等）时会弹出审批框，确认或拒绝。
+
+三、常用功能
+------------
+- 会话管理: 左侧可切换/新建会话；支持回退(rewind)到某一步并编辑重跑。
+- 计划评审: 复杂任务 agent 会先给出计划，可在计划评审对话框中修改后再执行。
+- 设置: 模型、上下文长度、任务提示词、审批策略等均可在 设置 中调整。
+- 后端异常: 若后端崩溃，窗口顶部会出现 "Backend process exited" 横幅，
+  点 Restart 即可原地重启，无需重开程序。
+
+四、远程服务器部署（可选，多客户端共用一个后端）
+------------------------------------------------
+把后端单独部署在一台服务器/开发机上，多台 GUI 通过远程模式连接:
+
+1. 在服务器上运行独立后端:
+     ./coder-agent-server-<ver>.linux.sh [port] [token]
+   （默认端口 8931；token 可选，用于鉴权）
+   启动后它会打印 WS_URL=ws://127.0.0.1:<port>。
+
+2. 在每台 GUI 机器上: 设置 -> 连接(Connection) -> 模式选 "remote"，
+   填写 host、port、token，连接后即可使用，本机不再启动后端。
+
+单机使用不需要这一步。
+
+五、数据保存在哪里
+------------------
+  配置/提示词/技能/记忆:  ~/.coder_agent            (Linux)
+                           %USERPROFILE%\.coder_agent (Windows)
+  GUI 状态(上次项目等):    ~/.config/coder-agent-gui  (Linux)
+                           %APPDATA%/coder-agent-gui  (Windows)
+  会话/快照:              <项目目录>/.agent
+
+六、常见问题
+------------
+- Linux 下 AppImage 打不开: 先 chmod +x；报 FUSE 相关错误时安装
+  libfuse2（sudo apt-get install libfuse2）；个别严格的 AppArmor/SELinux
+  环境可改用解包版 coder-agent-<ver>-linux/ 里的可执行文件。
+- 界面一直显示 "Starting backend...": 查看终端输出（Linux 下从终端启动
+  AppImage 可以看到 [backend] 日志），确认后端进程是否被安全软件拦截。
+- 中文输入: 程序基于 Chromium，原生支持 ibus/fcitx 输入法。
