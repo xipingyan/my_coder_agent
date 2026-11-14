@@ -8,6 +8,7 @@ coder_agent/engine.py
 coder_agent/events.py
 coder_agent/knowledge.py
 coder_agent/paths.py
+coder_agent/server.py
 coder_agent/stress.py
 coder_agent/util.py
 coder_agent/context/__init__.py
@@ -53,3 +54,4 @@ coder_agent_backend.egg-info/dependency_links.txt
 coder_agent_backend.egg-info/entry_points.txt
 coder_agent_backend.egg-info/requires.txt
 coder_agent_backend.egg-info/top_level.txt
+tests/test_server.py
