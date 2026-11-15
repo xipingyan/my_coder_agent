@@ -37,6 +37,11 @@ echo ) else (
 echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT% --token %TOKEN%
 echo )
 ) > "release\coder-agent-server-%VER%.win.bat"
+rem plain-name launcher so customers can just double-click "coder-agent"
+(
+echo @echo off
+echo start "" "%%~dp0coder-agent-%VER%-win\coder-agent.exe"
+) > "release\coder-agent.bat"
 rem usage guide for the end user
 copy /y guide_release.txt "release\guide.txt" >nul
 

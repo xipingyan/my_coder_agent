@@ -36,6 +36,8 @@ mkdir -p "$OUTDIR"
 cp -r "$OUTDIR/linux-unpacked" "$OUTDIR/coder-agent-${VER}-linux"
 rm -rf "$OUTDIR/linux-unpacked"
 cp gui/build-resources/backend/coder-agent-server "$OUTDIR/coder-agent-server-${VER}.linux"
+# plain-name symlink so customers can just run "coder-agent"
+ln -sf "coder-agent-${VER}.AppImage" "$OUTDIR/coder-agent"
 # plain server launcher: run it on the server machine, point the GUI at host:port
 cat > "$OUTDIR/coder-agent-server-${VER}.linux.sh" <<'EOF'
 #!/usr/bin/env bash
