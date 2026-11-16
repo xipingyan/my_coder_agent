@@ -36,8 +36,31 @@ else
     unset LLAMA_ARG_THINK
 fi
 
-# --- 只使用 V100 (GPU 0) ---
-export CUDA_VISIBLE_DEVICES=0
+# --- GPU 选择 ---
+# 用法: $0 start [gpu_id]，或 GPU_ID=1 $0 start；默认 0（编号与 nvidia-smi 一致）
+GPU_ID="${2:-${GPU_ID:-0}}"
+if ! [[ "$GPU_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    echo "[!] 无效的 GPU id: $GPU_ID"
+    exit 1
+fi
+# 默认 CUDA 按“性能最快优先”排序，编号会与 nvidia-smi 不一致，
+# 导致设置 1 实际选到另一张卡；强制按 PCI 总线顺序与 nvidia-smi 对齐
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES="$GPU_ID"
+# Ollama 0.32 默认同时启用 Vulkan 后端，Vulkan 不读取 CUDA_VISIBLE_DEVICES，
+# 会把所有显卡都暴露出来并可能选中 V100；关闭后只用 CUDA 后端
+export OLLAMA_VULKAN=false
+
+# 根据 GPU id 获取显卡名称（用于显示）
+get_gpu_names() {
+    local id names="" n
+    for id in ${GPU_ID//,/ }; do
+        n=$(nvidia-smi --query-gpu=name --format=csv,noheader -i "$id" 2>/dev/null | head -n1)
+        names+="${names:+, }${n:-未知}"
+    done
+    printf '%s\n' "$names"
+}
+GPU_NAME="$(get_gpu_names)"
 
 # ==================== 本机 IP 自动探测 ====================
 # 手动覆盖（可选）：执行前 export OLLAMA_BIND_IP="192.168.1.25"
@@ -193,7 +216,7 @@ case "$1" in
             echo "[+] 思考模式 : 开启"
         fi
 
-        echo "[+] 正在启动 Ollama 服务 (CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES})..."
+        echo "[+] 正在启动 Ollama 服务 (CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, 设备: ${GPU_NAME})..."
         echo "[+] 模型库: $OLLAMA_MODELS"
         echo "[+] 服务地址: http://$OLLAMA_HOST"
         echo "[+] 日志输出: $LOG_FILE"
@@ -248,7 +271,7 @@ case "$1" in
     restart)
         $0 stop
         sleep 2
-        $0 start
+        $0 start "$GPU_ID"
         ;;
 
     status)
@@ -266,7 +289,7 @@ case "$1" in
         ;;
 
     *)
-        echo "使用方法: $0 {start|stop|restart|status|log}"
+        echo "使用方法: $0 {start|stop|restart|status|log} [gpu_id]  (默认 gpu_id=0)"
         exit 1
         ;;
 esac
