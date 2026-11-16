@@ -13,6 +13,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# clean old artifacts BEFORE building (the AppImage is produced into release/
+# by electron-builder; cleaning afterwards would delete it and leave the
+# "coder-agent" symlink dangling)
+rm -rf release/coder-agent-* release/linux-unpacked release/win-unpacked \
+       release/builder-debug.yml release/builder-effective-config.yaml
+
 echo "==> building backend standalone executable"
 # PyInstaller is a build-time tool, not a runtime dependency, so it may be
 # missing from a freshly created venv.
@@ -32,15 +38,22 @@ cd ..
 VER=$(node -p "require('./gui/package.json').version")
 OUTDIR=release
 mkdir -p "$OUTDIR"
-# clean old artifacts so release/ only holds the current version
-rm -rf "$OUTDIR"/coder-agent-* "$OUTDIR"/builder-debug.yml \
-       "$OUTDIR"/builder-effective-config.yaml
+# electron-builder's debug dump, not a release artifact
+rm -f "$OUTDIR/builder-debug.yml" "$OUTDIR/builder-effective-config.yaml"
 # unpacked runnable binary (release/coder-agent-<ver>-linux)
 cp -r "$OUTDIR/linux-unpacked" "$OUTDIR/coder-agent-${VER}-linux"
 rm -rf "$OUTDIR/linux-unpacked"
 cp gui/build-resources/backend/coder-agent-server "$OUTDIR/coder-agent-server-${VER}.linux"
-# plain-name symlink so customers can just run "coder-agent"
-ln -sf "coder-agent-${VER}.AppImage" "$OUTDIR/coder-agent"
+# plain-name launcher so customers can just run "coder-agent"; it auto-adds
+# --no-sandbox (chrome-sandbox cannot be SUID-configured in a user-built
+# AppImage, see guide.txt). rm -f first: an old "coder-agent" may be a
+# symlink pointing AT the AppImage, and "cat >" would follow it.
+rm -f "$OUTDIR/coder-agent"
+cat > "$OUTDIR/coder-agent" <<EOF
+#!/usr/bin/env bash
+exec "\$(cd "\$(dirname "\$0")" && pwd)/coder-agent-${VER}.AppImage" --no-sandbox "\$@"
+EOF
+chmod +x "$OUTDIR/coder-agent"
 # server launcher (no version in name): starts the server in the background,
 # idempotent (safe to call from .bashrc), supports "stop"
 cat > "$OUTDIR/coder-agent-server.sh" <<'EOF'
@@ -50,7 +63,7 @@ cat > "$OUTDIR/coder-agent-server.sh" <<'EOF'
 #   coder-agent-server.sh [start] [port] [token]   start in background (default)
 #   coder-agent-server.sh stop                     stop the running server
 # then in the GUI: Settings > Connection > mode "remote", host, port, token.
-# Idempotent: if a server is already running, "start" exits 0 without dup.
+# Only one server per machine: "start" fails if one is already running.
 set -euo pipefail
 cd "$(dirname "$0")"
 BIN="__SERVER_BIN__"
@@ -73,8 +86,8 @@ stop)
     ;;
 start)
     if is_running; then
-        echo "coder-agent-server already running (pid $(cat "$PIDFILE"))"
-        exit 0
+        echo "coder-agent-server already running (pid $(cat "$PIDFILE")); one server per machine, use 'stop' first" >&2
+        exit 1
     fi
     PORT="${2:-8931}"
     TOKEN="${3:-}"

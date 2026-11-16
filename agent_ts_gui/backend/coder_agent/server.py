@@ -153,6 +153,7 @@ class Server:
     def _register(self) -> dict[str, Callable[..., Any]]:
         return {
             "ping": lambda p: "pong",
+            "default_config": lambda p: _jsonable(AppConfig()),
             "open_project": self.open_project,
             "list_dir": self.list_dir,
             "submit": self.submit,
@@ -384,18 +385,22 @@ class Server:
         return {"ok": True, "deleted": len(ids)}
 
     def save_config(self, p: dict) -> dict:
-        e = self._require_engine()
-        if self._busy:
+        # no engine required: the settings dialog must work before any project
+        # is open (the values then go to the user-wide config only)
+        e = self.engine
+        if e is not None and self._busy:
             raise RuntimeError("a turn is running")
         data = p.get("config") or {}
-        data.setdefault("paths", {})["project_root"] = str(e.root)
+        data.setdefault("paths", {})["project_root"] = str(e.root) if e else ""
         cfg = AppConfig.model_validate(data)
         persisted = cfg.model_copy(deep=True)
         persisted.paths.project_root = ""
         save_config(persisted)
-        e.apply_config(cfg)
-        e.reload_policy()
-        return {"ok": True, "task_types": e.task_types.names()}
+        if e is not None:
+            e.apply_config(cfg)
+            e.reload_policy()
+            return {"ok": True, "task_types": e.task_types.names()}
+        return {"ok": True, "task_types": []}
 
     def test_connection(self, p: dict) -> dict:
         cfg = AppConfig.model_validate(p.get("config") or {})

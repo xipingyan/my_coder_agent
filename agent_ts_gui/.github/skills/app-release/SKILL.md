@@ -32,11 +32,17 @@ release/                  # all artifacts (gitignored)
    - `coder-agent-<ver>.AppImage` (or NSIS installer)
    - `coder-agent-<ver>-linux` / `-win` (renamed unpacked dir)
    - `coder-agent-server-<ver>.linux` / `.win.exe` (standalone server binary)
-   - `coder-agent-server-<ver>.linux.sh` / `.win.bat` (server launcher:
-     `cd "$(dirname "$0")"`, `--host 0.0.0.0 --port $1 --token $2`)
+   - `coder-agent-server.sh` / `.bat` (versionless background server launcher:
+     `start [port] [token]` = nohup/wmic background + pid file, `stop` = kill
+     by pid; log/pid live next to the script. One server per machine: a
+     second `start` exits 1 with an error (so .bashrc auto-start only warns))
    - `guide.txt`
 4. **Plain-name launcher** for customers (no version in the name):
-   - Linux: `ln -sf coder-agent-<ver>.AppImage release/coder-agent`
+   - Linux: `coder-agent` wrapper script (NOT a symlink - a symlink cannot add
+     args): `exec "$(cd "$(dirname "$0")" && pwd)/coder-agent-<ver>.AppImage"
+     --no-sandbox "$@"`. The `--no-sandbox` is required: a user-built AppImage
+     cannot have a SUID-configured chrome-sandbox. `rm -f` the old symlink
+     before `cat >` (writing through a symlink would clobber the AppImage).
    - Windows: no symlinks -> generate `release\coder-agent.bat` containing
      `start "" "%~dp0coder-agent-<ver>-win\coder-agent.exe"`
 
@@ -62,6 +68,10 @@ release/                  # all artifacts (gitignored)
   (`ln -sf coder-agent-<ver>.AppImage coder-agent`) so the `release/` folder
   can be moved/copied as a whole; the Windows .bat uses `%~dp0`.
 - **electron-builder downloads AppImage tooling** automatically; no extra setup.
+- **Clean release/ BEFORE building, not after**: electron-builder writes the
+  AppImage into `release/` during the build; a post-build `rm -rf
+  release/coder-agent-*` deletes the fresh AppImage and leaves the
+  `coder-agent` symlink dangling (`No such file or directory`).
 
 ## 4. Verification checklist
 

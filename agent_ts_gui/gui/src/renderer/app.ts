@@ -856,21 +856,28 @@ const SETTINGS_TIPS: Record<string, string> = {
   confirm_each_stage: "Ask for confirmation after every stage",
 };
 
-async function settingsDialog(): Promise<boolean> {
+async function settingsDialog(initialTab = "model"): Promise<boolean> {
   const strategiesR = await call("context_strategies");
   const strategies: string[] = (strategiesR && !strategiesR.__error) ? strategiesR.strategies : ["summarize", "truncate"];
+  // no project open yet: fall back to the built-in defaults so the Server /
+  // Model fields are editable (saving then writes the user-wide config only)
+  let base = S.config;
+  if (!base) {
+    const d = await call("default_config");
+    base = (d && !d.__error) ? d : null;
+  }
   return new Promise((resolve) => {
     const modal = $("modal");
     modal.className = "modal wide anchored";
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Remote server</button><button data-p="appearance">Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
-      `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div><div class="page" data-p="connection"></div><div class="page" data-p="appearance"></div></div>` +
+      `<div class="tabs"><button data-p="model"${initialTab === "model" ? " class=\"active\"" : ""}>Model</button><button data-p="context"${initialTab === "context" ? " class=\"active\"" : ""}>Context &amp; agent</button><button data-p="prompts"${initialTab === "prompts" ? " class=\"active\"" : ""}>Task prompts</button><button data-p="approval"${initialTab === "approval" ? " class=\"active\"" : ""}>Approval</button><button data-p="connection"${initialTab === "connection" ? " class=\"active\"" : ""}>Remote server</button><button data-p="appearance"${initialTab === "appearance" ? " class=\"active\"" : ""}>Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
+      `<div class="pages"><div class="page${initialTab === "model" ? " active" : ""}" data-p="model"></div><div class="page${initialTab === "context" ? " active" : ""}" data-p="context"></div><div class="page${initialTab === "prompts" ? " active" : ""}" data-p="prompts"></div><div class="page${initialTab === "approval" ? " active" : ""}" data-p="approval"></div><div class="page${initialTab === "connection" ? " active" : ""}" data-p="connection"></div><div class="page${initialTab === "appearance" ? " active" : ""}" data-p="appearance"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
 
-    const cfg = JSON.parse(JSON.stringify(S.config ?? {}));
+    const cfg = JSON.parse(JSON.stringify(base ?? {}));
     const choices: Record<string, string[]> = {
       provider: ["openai_compat", "ollama"],
       algorithm: strategies,
@@ -1057,6 +1064,9 @@ async function settingsDialog(): Promise<boolean> {
       } else {
         showMsg(cPage, true, "No change.");
       }
+      // close the dialog: the connection is applied and saved (or unchanged)
+      void refreshRemoteLabel();
+      setTimeout(() => done(false), r.reconnected ? 400 : 1200);
     });
 
     // ---- appearance tab (GUI-local; applied immediately, persisted in localStorage)
@@ -1643,6 +1653,26 @@ $("settings-btn").addEventListener("click", () => {
   if (S.busy) { chat.line("\n[settings disabled while a turn is running]", "c-muted"); return; }
   void settingsDialog().then((saved) => { if (saved) chat.line("\n[settings saved]", "c-ok"); });
 });
+
+// ------------------------------------------------ remote server indicator
+// shown in the toolbar next to the project label while connected to a remote
+// agent server; clicking it opens Settings > Remote server
+async function refreshRemoteLabel() {
+  const el = $("remote-label");
+  const mode = await window.api.getConnMode().catch(() => "local");
+  if (mode !== "remote") { el.classList.add("hidden"); el.textContent = ""; return; }
+  const c = await window.api.getConnection().catch(() => null);
+  if (!c) { el.classList.add("hidden"); return; }
+  const text = `remote: ${c.host}:${c.port}`;
+  el.textContent = text;
+  el.title = `Connected to remote agent server ${c.host}:${c.port}${c.token ? " (token set)" : ""}\nClick to change the connection.`;
+  el.classList.remove("hidden");
+}
+$("remote-label").addEventListener("click", () => {
+  if (S.busy) { chat.line("\n[settings disabled while a turn is running]", "c-muted"); return; }
+  void settingsDialog("connection").then((saved) => { if (saved) chat.line("\n[settings saved]", "c-ok"); });
+});
+void refreshRemoteLabel();
 $("sp-btn").addEventListener("click", async () => {
   const task = ($("task-combo") as HTMLSelectElement).value;
   const taskType = task === "(auto)" ? "general" : task;
@@ -2082,10 +2112,11 @@ window.api.onBackendUrl(async () => {
   // in remote mode a remembered "local" project (path on this machine) cannot
   // be auto-opened: the server lives on another machine
   const remoteConn = (await window.api.getConnMode().catch(() => "local")) === "remote";
-  const root = (savedLast && (remoteConn ? savedLast.mode === "remote" : true)) ? savedLast.path : null
-    || S.pendingRoot
-    || (await window.api.getLastProject())
-    || (await window.api.getBackendRoot());
+  let root: string | null = null;
+  if (savedLast && (!remoteConn || savedLast.mode === "remote")) root = savedLast.path;
+  if (!root) root = S.pendingRoot;
+  if (!root) root = await window.api.getLastProject();
+  if (!root) root = await window.api.getBackendRoot();
   S.pendingRoot = null;
   if (root) {
     await openProject(root);

@@ -57,8 +57,8 @@ echo if exist "%%PIDFILE%%" (
 echo   for /f "usebackq delims=" %%p in ("%%PIDFILE%%") do set PID=%%p
 echo   tasklist /FI "PID eq %%PID%%" 2^>nul ^| findstr /I "%%BIN%%" ^>nul
 echo   if not errorlevel 1 (
-echo     echo coder-agent-server already running (pid %%PID%%)
-echo     exit /b 0
+echo     echo coder-agent-server already running (pid %%PID%%); one server per machine, use "stop" first 1^>^&2
+echo     exit /b 1
 echo   )
 echo )
 echo set PORT=%%2

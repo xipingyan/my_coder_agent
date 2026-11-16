@@ -6,6 +6,7 @@ Coder Agent — 使用指南
 一、目录内容
 ------------
 Linux（./release.sh 生成）:
+  coder-agent                       GUI 启动脚本（自动带 --no-sandbox，直接运行它）
   coder-agent-<ver>.AppImage        GUI 客户端（自包含）
   coder-agent-<ver>-linux/          GUI 解包版（无 FUSE 时用里面的 coder-agent）
   coder-agent-server-<ver>.linux    独立 server（仅远程部署需要）
@@ -22,9 +23,10 @@ Windows（Windows 上 release.bat 生成）:
 二、单机使用（推荐，GUI 与代码同机）
 ------------------------------------
 1. 启动 GUI:
-   Linux:   chmod +x coder-agent-<ver>.AppImage && ./coder-agent-<ver>.AppImage
-            （报 FUSE 错误: sudo apt-get install libfuse2；或直接用
-             coder-agent-<ver>-linux/coder-agent）
+   Linux:   chmod +x coder-agent-<ver>.AppImage && ./coder-agent
+            （coder-agent 是启动脚本，已自动带 --no-sandbox）
+            报 FUSE 错误: sudo apt-get install libfuse2
+            或用解包版: cd coder-agent-<ver>-linux && ./coder-agent --no-sandbox
    Windows: 运行 coder-agent-<ver>.exe 安装，或免安装运行
             coder-agent-<ver>-win\coder-agent.exe
 2. 首次启动等几秒（后端启动中）。
@@ -39,9 +41,10 @@ Windows（Windows 上 release.bat 生成）:
    - 默认端口 8931；token 建议设置（openssl rand -hex 16 生成）
    - 日志/状态: coder-agent-server.log / coder-agent-server.pid（同目录）
    - 停止: coder-agent-server.sh stop
+   - 一台机器只能跑一个 server: 已有实例时再 start 会报错退出
    - 登录自动启动（放 bashrc）:
        echo '/path/to/release/coder-agent-server.sh start 8931 <token>' >> ~/.bashrc
-     （脚本幂等，重复执行不会起多个）
+     （server 已在跑时登录只打印一行警告，不会起第二个）
    - 长期运行也可用 systemd: 改好 coder-agent-server.service 的
      User/ExecStart/token 后
        sudo cp coder-agent-server.service /etc/systemd/system/

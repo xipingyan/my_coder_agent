@@ -29,6 +29,7 @@ export interface Api {
   setLastProject: (p: string) => Promise<void>;
   restartBackend: (root: string | null) => Promise<void>;
   getConnection: () => Promise<Connection>;
+  getConnMode: () => Promise<"local" | "remote">;
   setConnection: (c: Connection) => Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }>;
   winMinimize: () => Promise<void>;
   winToggleMaximize: () => Promise<boolean>;
