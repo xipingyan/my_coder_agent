@@ -21,22 +21,59 @@ rem unpacked runnable binary (release\coder-agent-<ver>-win)
 if exist "release\coder-agent-%VER%-win" rmdir /s /q "release\coder-agent-%VER%-win"
 move "release\win-unpacked" "release\coder-agent-%VER%-win" >nul
 copy gui\build-resources\backend\coder-agent-server.exe "release\coder-agent-server-%VER%.win.exe"
+rem server launcher (no version in name): background start, idempotent, supports "stop"
 (
 echo @echo off
-echo rem Coder Agent server launcher (Windows).
-echo rem Usage: coder-agent-server-%VER%.win.bat [port] [token]
+echo rem Coder Agent server launcher (Windows, background).
+echo rem Usage:
+echo rem   coder-agent-server.bat [start] [port] [token]   start in background (default)
+echo rem   coder-agent-server.bat stop                     stop the running server
 echo rem then in the GUI: Settings ^> Connection ^> mode "remote", host, port, token.
 echo setlocal
 echo cd /d "%%~dp0"
-echo set PORT=%1
-echo if "%PORT%"=="" set PORT=8931
-echo set TOKEN=%2
-echo if "%TOKEN%"=="" (
-echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT%
-echo ) else (
-echo   "coder-agent-server-%VER%.win.exe" --host 0.0.0.0 --port %PORT% --token %TOKEN%
+echo set BIN=coder-agent-server-%VER%.win.exe
+echo set PIDFILE=coder-agent-server.pid
+echo if "%%1"=="" goto start
+echo if "%%1"=="stop" goto stop
+echo if "%%1"=="start" goto start
+echo usage: coder-agent-server.bat [start [port] [token] ^| stop]
+echo exit /b 1
+echo :stop
+echo if exist "%%PIDFILE%%" (
+echo   for /f "usebackq delims=" %%p in ("%%PIDFILE%%") do set PID=%%p
+echo   tasklist /FI "PID eq %%PID%%" 2^>nul ^| findstr /I "%%BIN%%" ^>nul
+echo   if not errorlevel 1 (
+echo     taskkill /F /PID %%PID%% ^>nul
+echo     del "%%PIDFILE%%"
+echo     echo coder-agent-server stopped
+echo     exit /b 0
+echo   )
 echo )
-) > "release\coder-agent-server-%VER%.win.bat"
+echo del "%%PIDFILE%%" 2^>nul
+echo coder-agent-server not running
+echo exit /b 0
+echo :start
+echo if exist "%%PIDFILE%%" (
+echo   for /f "usebackq delims=" %%p in ("%%PIDFILE%%") do set PID=%%p
+echo   tasklist /FI "PID eq %%PID%%" 2^>nul ^| findstr /I "%%BIN%%" ^>nul
+echo   if not errorlevel 1 (
+echo     echo coder-agent-server already running (pid %%PID%%)
+echo     exit /b 0
+echo   )
+echo )
+echo set PORT=%%2
+echo if "%%PORT%%"=="" set PORT=8931
+echo set TOKEN=%%3
+echo if "%%TOKEN%%"=="" (
+echo   set ARGS=--host 0.0.0.0 --port %%PORT%%
+echo ) else (
+echo   set ARGS=--host 0.0.0.0 --port %%PORT%% --token %%TOKEN%%
+echo )
+echo for /f "tokens=2 delims=:" %%p in ('wmic process call create "%%~dp0%%BIN%% %%ARGS%%" ^| findstr "ProcessId "') do (
+echo   echo %%p^>%%PIDFILE%%
+echo   echo coder-agent-server started (pid %%p^)
+echo )
+) > "release\coder-agent-server.bat"
 rem plain-name launcher so customers can just double-click "coder-agent"
 (
 echo @echo off
