@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("api", {
   setLastProject: (p: string): Promise<void> => ipcRenderer.invoke("set-last-project", p),
   restartBackend: (root: string | null): Promise<void> => ipcRenderer.invoke("restart-backend", root),
   getConnection: (): Promise<{ mode: string; host: string; port: number; token: string }> => ipcRenderer.invoke("get-connection"),
+  getConnMode: (): Promise<"local" | "remote"> => ipcRenderer.invoke("conn-mode"),
   setConnection: (c: { mode: string; host: string; port: number; token: string }): Promise<{ ok: boolean; reconnected?: boolean; url?: string; error?: string }> => ipcRenderer.invoke("set-connection", c),
   winMinimize: (): Promise<void> => ipcRenderer.invoke("win-minimize"),
   winToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("win-toggle-maximize"),

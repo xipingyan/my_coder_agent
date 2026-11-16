@@ -29,6 +29,9 @@ let backendRoot: string | null = null;
 let window: BrowserWindow | null = null;
 let ws: WebSocket | null = null;
 let reconnecting = false; // suppress "backend-exit" while switching connections
+let remoteReconnect = false; // auto-reconnect is active for the current remote connection
+let reconnectTimer: NodeJS.Timeout | null = null;
+let reconnectDelay = 1000; // ms, grows x2 up to 15s
 
 // ------------------------------------------------------------- connection
 // mode "local"  = spawn the bundled backend on this machine (default, as before).
@@ -113,6 +116,12 @@ function startBackend(root: string | null): Promise<string> {
 }
 
 // ------------------------------------------------------------- ws bridge
+function stopReconnect() {
+  remoteReconnect = false;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectDelay = 1000;
+}
+
 function closeWs() {
   if (ws) {
     try { ws.close(); } catch { /* ignore */ }
@@ -144,10 +153,37 @@ function connectWs(url: string, token = ""): Promise<void> {
     }
   });
   socket.on("close", () => {
-    if (ws === socket) ws = null;
+    // Only the socket that is still "current" triggers a reconnect. When we
+    // deliberately closeWs() (switching connections / restarting), ws is already
+    // null, so a replaced socket's close event must not start reconnecting.
+    const isCurrent = ws === socket;
+    if (isCurrent) ws = null;
+    if (isCurrent && remoteReconnect && !quitting) {
+      if (window && !window.isDestroyed()) window.webContents.send("backend-exit", null);
+      console.log(`[main] remote ws closed, retry in ${reconnectDelay}ms`);
+      scheduleReconnect(url, token);
+    }
   });
   socket.on("error", () => { /* close follows */ });
   return opened;
+}
+
+function scheduleReconnect(url: string, token: string) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!remoteReconnect || quitting) return;
+    try {
+      await connectWs(url, token);
+      reconnectDelay = 1000;
+      if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);
+    } catch (e) {
+      console.log("[main] remote reconnect failed:", e);
+      if (window && !window.isDestroyed()) window.webContents.send("backend-exit", null);
+      reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+      if (!quitting) scheduleReconnect(url, token);
+    }
+  }, reconnectDelay);
 }
 
 // ------------------------------------------------------------- last project
@@ -156,6 +192,7 @@ function lastProjectFile(): string {
 }
 
 function lastProject(): string | null {
+  if (conn.mode === "remote") return null; // the path lives on the server machine
   const p = lastProjectFile();
   if (fs.existsSync(p)) {
     const last = fs.readFileSync(p, "utf8").trim();
@@ -196,9 +233,13 @@ async function createWindowAsync(root: string | null) {
   if (conn.mode === "remote") {
     url = `ws://${conn.host}:${conn.port}`;
     console.log("[main] remote mode, connecting to", url);
+    remoteReconnect = true; // keep trying if the link drops later
+    reconnectDelay = 1000;
     try {
       await connectWs(url, conn.token);
     } catch (e) {
+      // first attempt failed: the banner is up, the auto-reconnect loop (armed
+      // by the close event) will keep trying in the background
       console.error("[main] remote connect failed:", e);
       window.webContents.send("backend-exit", null);
       return;
@@ -271,6 +312,7 @@ app.whenReady().then(() => {
     try { fs.writeFileSync(lastProjectFile(), p); } catch { /* ignore */ }
   });
   ipcMain.handle("get-connection", () => conn);
+  ipcMain.handle("conn-mode", () => conn.mode);
   ipcMain.handle("set-connection", async (_e, c: object) => {
     reconnecting = true; // cleared when the old proc's exit handler fires (or on timeout)
     setTimeout(() => { reconnecting = false; }, 15000);
@@ -288,6 +330,7 @@ app.whenReady().then(() => {
       return { ok: true, reconnected: false };
     saveConn(next);
     // reconnect in place: drop the old connection, then start/connect the new one
+    stopReconnect(); // the old socket's close event must not start a remote reconnect
     if (backend) {
       const old = backend;
       backend = null;
@@ -304,6 +347,8 @@ app.whenReady().then(() => {
       let url: string;
       if (next.mode === "remote") {
         url = `ws://${next.host}:${next.port}`;
+        remoteReconnect = true;
+        reconnectDelay = 1000;
         await connectWs(url, next.token);
       } else {
         url = await startBackend(backendRoot ?? lastProject());
@@ -333,12 +378,15 @@ app.whenReady().then(() => {
         old.once("exit", () => { clearTimeout(t); res(); });
       });
     }
+    stopReconnect();
     closeWs();
     try {
       let url: string;
       if (conn.mode === "remote") {
         // remote mode: "restart" = reconnect to the remote server
         url = `ws://${conn.host}:${conn.port}`;
+        remoteReconnect = true;
+        reconnectDelay = 1000;
         await connectWs(url, conn.token);
       } else {
         url = await startBackend(r);
@@ -359,9 +407,16 @@ app.whenReady().then(() => {
 function killBackend() {
   if (quitting) return;
   quitting = true;
-  // best-effort: ask the backend to stop the running turn, then kill it
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    try { ws.send(JSON.stringify({ id: 0, method: "cancel", params: {} })); } catch { /* ignore */ }
+  // local mode: best-effort ask the backend to stop the running turn, then kill
+  // the process. Remote mode: the server keeps running on its own machine -
+  // closing the GUI must NOT cancel the user's turn, so just drop the socket.
+  if (backend) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ id: 0, method: "cancel", params: {} })); } catch { /* ignore */ }
+    }
+  } else {
+    stopReconnect();
+    closeWs();
   }
   const proc = backend;
   if (!proc || proc.exitCode !== null || proc.signalCode) { app.quit(); return; }

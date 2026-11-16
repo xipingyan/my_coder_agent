@@ -236,14 +236,52 @@ def test_busy_guard_and_sessions(server_process):
     asyncio.run(scenario())
 
 
+def test_turn_survives_disconnect(server_process):
+    """Remote mode: the GUI drops the connection while a turn waits for an
+    approval; the server must keep the turn alive, and re-ask the question
+    when the GUI reconnects (open_project must not rebuild the engine)."""
+    url, project, home = server_process
+
+    async def scenario():
+        async with websockets.connect(url) as ws:
+            c = Client(ws)
+            r = await c.call("open_project", root=str(project))
+            assert "resumed" not in r
+            await c.call("submit", prompt="write hello.txt")
+            ev = await c.wait_event("approval_requested")
+            # the GUI goes away (network blip): the turn must NOT be cancelled
+            await ws.close()
+            await asyncio.sleep(0.5)
+
+            async with websockets.connect(url) as ws2:
+                c2 = Client(ws2)
+                r2 = await c2.call("open_project", root=str(project))
+                assert r2["resumed"] is True, r2
+                # the pending question is re-asked with its original payload
+                ev2 = await c2.wait_event("approval_requested")
+                assert ev2["data"]["req_id"] == ev["data"]["req_id"]
+                assert ev2["data"].get("reasked") is True
+                assert ev2["data"]["tool"] == "write_file"
+                await c2.call("answer", req_id=ev2["data"]["req_id"], response={"allow": True})
+                fin = await c2.wait_event("turn_finished")
+                assert fin["data"]["status"] == "done", fin
+                assert (project / "hello.txt").read_text() == "hi"
+
+    asyncio.run(scenario())
+
+
 def test_delete_sessions(server_process):
     url, project, home = server_process
 
     async def scenario():
         async with websockets.connect(url) as ws:
             c = Client(ws)
-            others = [(await c.call("open_project", root=str(project)))["session_id"] for _ in range(2)]
+            # open_project is idempotent (reusing the engine), so extra sessions
+            # are created with new_session
+            (await c.call("open_project", root=str(project)))
+            others = [(await c.call("new_session"))["session_id"] for _ in range(2)]
             current = (await c.call("open_project", root=str(project)))["session_id"]
+            assert current not in others
             # delete two non-current sessions
             r = await c.call("delete_sessions", session_ids=others)
             assert r["ok"] and r["deleted"] == 2 and "new_session" not in r

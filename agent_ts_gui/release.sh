@@ -54,6 +54,8 @@ exec ./__SERVER_BIN__ "${ARGS[@]}"
 EOF
 sed -i "s/__SERVER_BIN__/coder-agent-server-${VER}.linux/" "$OUTDIR/coder-agent-server-${VER}.linux.sh"
 chmod +x "$OUTDIR/coder-agent-server-${VER}.linux" "$OUTDIR/coder-agent-server-${VER}.linux.sh"
+# systemd unit for running the server as a service on the Linux target machine
+cp coder-agent-server.service "$OUTDIR/coder-agent-server.service"
 # usage guide for the end user
 cp guide_release.txt "$OUTDIR/guide.txt"
 

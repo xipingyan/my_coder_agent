@@ -70,11 +70,11 @@ function stopRemoteServer() {
   } catch { /* ignore */ }
 }
 
-function runOne(name) {
+function runOne(name, extraEnv = {}) {
   const script = path.join(GUI, SUITES[name]);
   const t0 = Date.now();
   console.log(`\n=== ${name} (${SUITES[name]}) ===`);
-  const r = spawnSync(process.execPath, [script], { stdio: "inherit" });
+  const r = spawnSync(process.execPath, [script], { stdio: "inherit", env: { ...process.env, ...extraEnv } });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   return { name, ok: r.status === 0, secs };
 }
@@ -96,7 +96,9 @@ function runOne(name) {
       startRemoteServer();
       remoteOwned = true;
     }
-    results.push(runOne(name));
+    // the remote test kills/restarts the server on :8931 to exercise the GUI's
+    // auto-reconnect; tell it when it may do so (only if we own the server)
+    results.push(runOne(name, { CDP_REMOTE_OWN_SERVER: remoteOwned && name === "remote" ? "1" : "0" }));
   }
   if (remoteOwned) stopRemoteServer();
 

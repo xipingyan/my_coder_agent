@@ -42,6 +42,8 @@ rem plain-name launcher so customers can just double-click "coder-agent"
 echo @echo off
 echo start "" "%%~dp0coder-agent-%VER%-win\coder-agent.exe"
 ) > "release\coder-agent.bat"
+rem systemd unit for the Linux server machine (GUI on Windows + server on Linux)
+copy /y coder-agent-server.service "release\coder-agent-server.service" >nul
 rem usage guide for the end user
 copy /y guide_release.txt "release\guide.txt" >nul
 

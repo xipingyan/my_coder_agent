@@ -245,7 +245,9 @@ async function openProject(root: string, sessionId: string | null = null) {
   $("root-label").title = `${saved ? saved.name + " (" + saved.mode + ")\n" : ""}${r.root}`;
   document.title = `Coder Agent: ${r.root}`;
   ($("effort-combo") as HTMLSelectElement).value = S.effort;
-  window.api.setLastProject(r.root);
+  // the last-project record is only meaningful for local paths; in remote mode
+  // the project lives on the server machine (remembered by name in localStorage)
+  window.api.getConnMode().then((m) => { if (m === "local") window.api.setLastProject(r.root); }).catch(() => {});
   reloadTaskTypes();
   resetViews();
   await replaySession();
@@ -863,7 +865,7 @@ async function settingsDialog(): Promise<boolean> {
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Connection</button><button data-p="appearance">Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
+      `<div class="tabs"><button data-p="model" class="active">Model</button><button data-p="context">Context &amp; agent</button><button data-p="prompts">Task prompts</button><button data-p="approval">Approval</button><button data-p="connection">Remote server</button><button data-p="appearance">Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
       `<div class="pages"><div class="page active" data-p="model"></div><div class="page" data-p="context"></div><div class="page" data-p="prompts"></div><div class="page" data-p="approval"></div><div class="page" data-p="connection"></div><div class="page" data-p="appearance"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
@@ -1018,7 +1020,7 @@ async function settingsDialog(): Promise<boolean> {
     // ---- connection tab (GUI <-> agent server; independent of the LLM "server" above)
     const cPage = modal.querySelector<HTMLElement>('.page[data-p="connection"]')!;
     cPage.innerHTML =
-      `<fieldset class="grp"><legend>Agent server connection</legend>` +
+      `<fieldset class="grp"><legend>Remote server</legend>` +
       `<div class="field"><span class="lbl">mode</span><select class="c-mode"><option value="local">local (this machine, auto-started)</option><option value="remote">remote (coder-agent-server on another machine)</option></select></div>` +
       `<div class="field"><span class="lbl">host</span><input type="text" class="c-host"/></div>` +
       `<div class="field"><span class="lbl">port</span><input type="number" class="c-port"/></div>` +
@@ -1689,6 +1691,13 @@ function rememberProject(name: string, mode: "local" | "remote", path: string) {
 }
 
 async function openProjectNamed(name: string, mode: "local" | "remote", path: string) {
+  // a "local" project is a path on THIS machine; in remote mode the server
+  // lives on another machine and cannot see it
+  const connMode = await window.api.getConnMode().catch(() => "local");
+  if (connMode === "remote" && mode === "local") {
+    chat.line(`\n[error] project "${name}" (${path}) is on this machine, but the agent server runs remotely. Remove it and add the folder on the server instead.`, "c-error");
+    return;
+  }
   rememberProject(name, mode, path);
   setLastProjectName(name);
   if (!(await window.api.getBackendUrl())) {
@@ -1747,16 +1756,21 @@ function browseRemoteDir(initial: string): Promise<string | null> {
 async function projectsDialog(): Promise<void> {
   const list = loadProjects();
   const last = lastProjectName();
+  // in remote mode the project paths live on the server machine, so a native
+  // folder dialog on this machine would pick paths the server cannot see
+  const remoteMode = (await window.api.getConnMode().catch(() => "local")) === "remote";
   const modal = $("modal");
   modal.className = "modal wide";
   modal.innerHTML =
     `<div class="head">Projects</div>` +
     `<div class="body"><div class="projlist"></div>` +
     `<div class="msg"></div>` +
-    `<div class="btnrow"><button class="add-local">+ Local project...</button>` +
-    `<button class="add-remote">+ Remote project...</button>` +
+    `<div class="btnrow">${remoteMode ? "" : `<button class="add-local">+ Local project...</button>`}` +
+    `<button class="add-remote">+ ${remoteMode ? "Server project..." : "Remote project..."}</button>` +
     `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
-    `<div class="tip" style="font-size:11px;color:var(--text-soft2)">Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). Projects are remembered by name.</div></div>` +
+    `<div class="tip" style="font-size:11px;color:var(--text-soft2)">${remoteMode
+      ? "Projects live on the machine the agent server runs on (browsed over the connection). "
+      : "Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). "}Projects are remembered by name.</div></div>` +
     `<div class="foot"><button class="open">Open</button><span class="flex1"></span><button class="primary yes">Close</button></div>`;
   const listEl = modal.querySelector(".projlist")!;
   const msg = modal.querySelector(".msg")!;
@@ -1793,7 +1807,8 @@ async function projectsDialog(): Promise<void> {
     void openProjectNamed(selected.name, selected.mode, selected.path);
   });
 
-  modal.querySelector(".add-local")!.addEventListener("click", async () => {
+  const addLocalBtn = modal.querySelector(".add-local");
+  if (addLocalBtn) addLocalBtn.addEventListener("click", async () => {
     // __pickDirectory is a CDP-test hook (see window.__onEvent); defaults to the
     // native picker, which a headless test cannot drive.
     const pick: () => Promise<string | null> = (window as any).__pickDirectory ?? window.api.pickDirectory;
@@ -2023,7 +2038,17 @@ window.api.onBackendUrl(async () => {
   if (banner) banner.remove();
   const r = S.root || S.pendingRoot || (await window.api.getBackendRoot());
   S.pendingRoot = null;
-  if (r) openProject(r);
+  if (!r) { $("state-label").textContent = "Connected"; return; }
+  await openProject(r);
+  // a turn may have kept running on the server while the link was down
+  if (S.root) {
+    const t = await call("session_turns");
+    const running = !t?.__error && (t.turns as any[]).some((x) => x.status === "running");
+    if (running) {
+      chat.line("\n[connection restored - a task is still running on the server]", "c-ok");
+      setState("running_tool", "task running on the server");
+    }
+  }
 });
 
 (async function boot() {
@@ -2054,7 +2079,10 @@ window.api.onBackendUrl(async () => {
   // plain-path record, then to whatever the main process started with)
   const last = lastProjectName();
   const savedLast = last ? loadProjects().find((p) => p.name === last) : null;
-  const root = savedLast?.path
+  // in remote mode a remembered "local" project (path on this machine) cannot
+  // be auto-opened: the server lives on another machine
+  const remoteConn = (await window.api.getConnMode().catch(() => "local")) === "remote";
+  const root = (savedLast && (remoteConn ? savedLast.mode === "remote" : true)) ? savedLast.path : null
     || S.pendingRoot
     || (await window.api.getLastProject())
     || (await window.api.getBackendRoot());

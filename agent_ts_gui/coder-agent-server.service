@@ -1,0 +1,29 @@
+# Coder Agent server - systemd unit (Linux target machine).
+#
+# Install:
+#   1. copy the server binary + this file to the server machine, e.g. /opt/coder-agent/
+#   2. edit the two lines below (User, ExecStart, Token)
+#   3. sudo cp coder-agent-server.service /etc/systemd/system/
+#   4. sudo systemctl daemon-reload
+#   5. sudo systemctl enable --now coder-agent-server
+#   6. journalctl -u coder-agent-server -f     (watch the logs; the WS_URL line
+#      shows the address to put in the GUI's Settings > Connection)
+#
+# The GUI (on the Windows machine) connects via Settings > Connection >
+# mode "remote", host = this machine's LAN IP, port 8931, token = the same
+# secret as below.
+[Unit]
+Description=Coder Agent server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/opt/coder-agent
+ExecStart=/opt/coder-agent/coder-agent-server --host 0.0.0.0 --port 8931 --token YOUR_SECRET
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

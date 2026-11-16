@@ -58,6 +58,9 @@ class _Pending:
         self.done = threading.Event()
         self.response: Any = None
         self.on_timeout: Any = None  # value used when the user cancels
+        self.created = time.monotonic()  # for the "GUI went away" auto-answer
+        self.payload: Any = None  # the event data, re-pushed if the GUI reconnects
+        self.reasked = False  # set once the GUI has been re-asked
 
 
 def _jsonable(value: Any) -> Any:
@@ -82,9 +85,10 @@ class ApprovalAsk:
         self._next = 0
 
     def ask(self, req: ApprovalRequest) -> ApprovalResponse:
-        req_id, p = self.server.question("approval", ApprovalResponse(False, "cancelled by user"))
+        data = dict(_jsonable(req))
+        req_id, p = self.server.question("approval", ApprovalResponse(False, "cancelled by user"), data)
         # the request fields are flattened into data (kind, tool, title, ...) + req_id
-        self.server.push_event("approval_requested", "main", dict(_jsonable(req), req_id=req_id))
+        self.server.push_event("approval_requested", "main", dict(data, req_id=req_id))
         resp = self.server.wait(p)
         if not isinstance(resp, ApprovalResponse):  # the GUI answers with a JSON dict
             resp = ApprovalResponse(
@@ -105,16 +109,18 @@ class PlanAsk:
         self._n_stage = 0
 
     def confirm_plan(self, plan: Plan) -> Optional[Plan]:
-        req_id, p = self.server.question("plan", None)  # cancellation == plan rejected
-        self.server.push_event("plan_review_requested", "planner", dict(_jsonable(plan), req_id=req_id))
+        data = _jsonable(plan)
+        req_id, p = self.server.question("plan", None, data)  # cancellation == plan rejected
+        self.server.push_event("plan_review_requested", "planner", dict(data, req_id=req_id))
         resp = self.server.wait(p)
         if isinstance(resp, dict):  # the GUI answers with the (possibly edited) plan dict
             return Plan.from_dict(resp)
         return resp
 
     def confirm_stage(self, report: StageReport) -> str:
-        req_id, p = self.server.question("stage", "stop")
-        self.server.push_event("stage_confirm_requested", "planner", dict(_jsonable(report), req_id=req_id))
+        data = _jsonable(report)
+        req_id, p = self.server.question("stage", "stop", data)
+        self.server.push_event("stage_confirm_requested", "planner", dict(data, req_id=req_id))
         return self.server.wait(p)
 
 
@@ -122,6 +128,7 @@ class PlanAsk:
 class Server:
     def __init__(self, root: Optional[Path], provider_factory: ProviderFactory = None) -> None:
         self.root: Optional[Path] = Path(root).resolve() if root else None
+        self._last_root: Optional[Path] = None  # set by open_project (re-open after a restart)
         self.provider_factory = provider_factory
         self.engine: Optional[Engine] = None
         self.bus: Optional[EventBus] = None
@@ -131,9 +138,15 @@ class Server:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.token: str = ""  # if set, the first message must be {"token": ...}
         self.pending: dict[str, _Pending] = {}
+        # Remote mode: a running turn must survive the GUI going away (network
+        # blip, laptop sleep). Questions asked while the GUI is detached are
+        # auto-answered with their cancel value after this many seconds so the
+        # agent can keep making progress instead of parking forever.
+        self.question_timeout = 120.0
         self._send_lock = asyncio.Lock()
         self._busy = False
         self._counter = 0
+        self._unsubscribe = None  # EventBus subscription of the current engine
         self._methods: dict[str, Callable[..., Any]] = self._register()
 
     # ------------------------------------------------------------- plumbing
@@ -205,12 +218,13 @@ class Server:
             return
         self.push_event(ev.kind, ev.agent_id, ev.data)
 
-    def question(self, prefix: str, on_timeout: Any) -> tuple[str, _Pending]:
+    def question(self, prefix: str, on_timeout: Any, payload: Any = None) -> tuple[str, _Pending]:
         """Create a pending question (called from a worker thread)."""
         self._counter += 1
         req_id = f"{prefix}-{self._counter}"
         p = _Pending()
         p.on_timeout = on_timeout
+        p.payload = payload
         self.pending[req_id] = p
         return req_id, p
 
@@ -244,8 +258,25 @@ class Server:
     def open_project(self, p: dict) -> dict:
         root = Path(p.get("root") or (self.root or Path.cwd())).resolve()
         session_id = p.get("session_id")
+        # Idempotent: re-opening the project the server already has (no
+        # session switch requested) must NOT rebuild the engine - a GUI
+        # reconnect after a network blip would otherwise drop a running turn.
+        # "fresh" forces a new session (the new_session RPC).
+        if (self.engine is not None and not session_id and not p.get("fresh")
+                and self.engine.root == root):
+            e = self.engine
+            return {
+                "root": str(e.root),
+                "session_id": e.session.id,
+                "task_types": e.task_types.names(),
+                "effort": e.config.thinking.effort,
+                "config": _jsonable(e.config),
+                "resumed": True,
+            }
         cfg = load_config(root)
         session = Session.load(root, session_id) if session_id else None
+        if self._unsubscribe is not None:
+            self._unsubscribe()
         self.engine = Engine(cfg, root, EventBus(), approver=None, session=session)
         self.bus = self.engine.bus
         self.approvals = ApprovalAsk(self)
@@ -253,8 +284,9 @@ class Server:
         self.engine.approver = _serialised(self.approvals.ask)
         if self.provider_factory is not None:
             self.engine._provider_override = self.provider_factory()
-        self.bus.subscribe(self._on_bus_event)
+        self._unsubscribe = self.bus.subscribe(self._on_bus_event)
         self.root = root
+        self._last_root = root
         return {
             "root": str(root),
             "session_id": self.engine.session.id,
@@ -318,7 +350,7 @@ class Server:
         e = self._require_engine()
         if self._busy:
             raise RuntimeError("a turn is running")
-        self.open_project({"root": str(e.root)})
+        self.open_project({"root": str(e.root), "fresh": True})
         return {"session_id": e.session.id}
 
     def open_session(self, p: dict) -> dict:
@@ -579,6 +611,30 @@ class Server:
                 await old.close(code=1000, reason="replaced by a new client")
             except Exception:  # noqa: BLE001
                 pass
+        # The server process restarted while the GUI was away: the engine is
+        # gone, so re-open the last project to make the GUI's automatic
+        # re-open (same root) succeed. _last_root is only set by open_project,
+        # so a fresh server (engine never opened) is left alone.
+        if self.engine is None and self._last_root is not None:
+            try:
+                await asyncio.to_thread(self.open_project, {"root": str(self._last_root)})
+            except Exception:
+                pass
+        # A turn may have kept running while the GUI was away. Questions that
+        # outlived the connection are auto-answered with their cancel value so
+        # the agent is not parked on a question nobody can see; fresh ones
+        # (asked just before the reconnect) are re-pushed to the new client.
+        now = time.monotonic()
+        for req_id, pend in list(self.pending.items()):
+            if now - pend.created >= self.question_timeout:
+                pend.response = pend.on_timeout
+                pend.done.set()
+                self.pending.pop(req_id, None)
+            elif not pend.reasked:
+                # re-ask once: the GUI missed the original event stream
+                pend.reasked = True
+                data = dict(pend.payload or {})
+                self.push_event(self._question_kind(req_id), "main", dict(data, req_id=req_id, reasked=True))
 
     async def detach(self, ws=None) -> None:
         # only the currently attached client detaches; a replaced client's
@@ -586,13 +642,16 @@ class Server:
         if ws is not None and self.ws is not ws:
             return
         self.ws = None
-        # answer every pending question with its cancel value so workers unblock
-        for pend in list(self.pending.values()):
-            pend.response = pend.on_timeout
-            pend.done.set()
-        self.pending.clear()
-        if self.engine is not None:
-            self.engine.cancel()
+        # NOTE: a running turn is NOT cancelled here. In remote mode the GUI
+        # may disconnect for a while (network blip, laptop sleep) and the work
+        # on the server machine must keep going; the GUI re-syncs from
+        # session_detail / the live event stream when it reconnects. Pending
+        # questions are auto-answered by attach() if they outlive the gap.
+
+    _KIND_BY_PREFIX = {"approval": "approval_requested", "plan": "plan_review_requested", "stage": "stage_confirm_requested"}
+
+    def _question_kind(self, req_id: str) -> str:
+        return self._KIND_BY_PREFIX.get(req_id.split("-", 1)[0], "approval_requested")
 
 
 # --------------------------------------------------------------------- main
@@ -644,14 +703,42 @@ def run(argv: list[str], provider_factory: ProviderFactory = None) -> int:
                     help="port to listen on (default: pick a free one)")
     ap.add_argument("--token", default=None,
                     help="shared secret: the GUI must send it as the first message")
+    ap.add_argument("--version", action="store_true", help="print the version and exit")
     args = ap.parse_args(argv)
+
+    if args.version:
+        try:
+            from importlib.metadata import version
+            print(version("coder-agent-backend"))
+        except Exception:
+            print("unknown")
+        return 0
+
+    # A server reachable from other machines must not run unauthenticated: the
+    # token is the only thing standing between a LAN peer and full control of
+    # the agent (it can run commands and write files as the server user).
+    if args.host not in ("127.0.0.1", "localhost") and not args.token:
+        print("WARNING: binding to a non-loopback interface without --token. "
+              "Anyone on the network can drive this agent. Use --token <secret> "
+              "(e.g. from: openssl rand -hex 16).", file=sys.stderr, flush=True)
 
     async def _run() -> None:
         server = Server(Path(args.root) if args.root else None, provider_factory)
         server.token = args.token or ""
         srv = await websockets.serve(lambda ws, *args: handler(ws, server), args.host, args.port)
         port = srv.sockets[0].getsockname()[1]
-        print(f"WS_URL=ws://{args.host}:{port}", flush=True)
+        # 0.0.0.0 is not a connectable address: print the machine's real IPs
+        # so the GUI operator knows what to put in the Connection settings.
+        if args.host in ("0.0.0.0", "::"):
+            import socket
+            try:
+                ips = [ip for ip in socket.gethostbyname_ex(socket.gethostname())[2]
+                       if not ip.startswith("127.")]
+            except OSError:
+                ips = []
+            print(f"WS_URL=ws://<this machine's IP>:{port}  (e.g. {', '.join(ips) or '127.0.0.1'})", flush=True)
+        else:
+            print(f"WS_URL=ws://{args.host}:{port}", flush=True)
         if args.token:
             print("TOKEN=required", flush=True)
         await asyncio.Future()  # run forever

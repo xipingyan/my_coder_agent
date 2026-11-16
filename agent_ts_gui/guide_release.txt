@@ -11,6 +11,7 @@ Linux 版（由 ./release.sh 生成）:
   coder-agent-<ver>-linux/              解包版（不方便用 AppImage 的机器可直接运行里面的 coder-agent）
   coder-agent-server-<ver>.linux        独立后端（仅"远程服务器部署"方式需要，单机使用可忽略）
   coder-agent-server-<ver>.linux.sh     独立后端启动脚本（同上）
+  coder-agent-server.service            systemd 服务模板（同上，长期运行用）
   guide.txt                             本说明
 
 Windows 版（在 Windows 上由 release.bat 生成）:
@@ -59,19 +60,42 @@ Windows 版（在 Windows 上由 release.bat 生成）:
 - 后端异常: 若后端崩溃，窗口顶部会出现 "Backend process exited" 横幅，
   点 Restart 即可原地重启，无需重开程序。
 
-四、远程服务器部署（可选，多客户端共用一个后端）
+四、远程部署（GUI 与服务器在不同机器，推荐的生产用法）
 ------------------------------------------------
-把后端单独部署在一台服务器/开发机上，多台 GUI 通过远程模式连接:
+典型部署: GUI 跑在 Windows 办公机，agent server 跑在 Linux 目标机器
+（代码、Ollama 模型都在 Linux 机器上）。
 
-1. 在服务器上运行独立后端:
-     ./coder-agent-server-<ver>.linux.sh [port] [token]
-   （默认端口 8931；token 可选，用于鉴权）
-   启动后它会打印 WS_URL=ws://127.0.0.1:<port>。
+1. 在 Linux 服务器上部署独立后端:
+     ./coder-agent-server-<ver>.linux.sh <port> <token>
+   （默认端口 8931；token 强烈建议设置，用 "openssl rand -hex 16" 生成）
+   启动后它会打印 WS_URL=ws://<本机IP>:<port>，这个 IP 就是 GUI 要填的 host。
 
-2. 在每台 GUI 机器上: 设置 -> 连接(Connection) -> 模式选 "remote"，
-   填写 host、port、token，连接后即可使用，本机不再启动后端。
+   长期运行建议装成 systemd 服务（用发布目录里的 coder-agent-server.service，
+   改好 User / ExecStart / token 后）:
+     sudo cp coder-agent-server.service /etc/systemd/system/
+     sudo systemctl enable --now coder-agent-server
+     journalctl -u coder-agent-server -f
 
-单机使用不需要这一步。
+2. 在 Linux 服务器上配置 LLM（Ollama）:
+   打开 GUI 的 设置 -> Model，填 Ollama 地址（如 http://127.0.0.1:11434/v1，
+   因为 Ollama 和 server 在同一台机器）并保存。配置保存在 server 机器的
+   ~/.coder_agent/config.toml，与 GUI 所在机器无关。
+
+3. 在 Windows GUI 机器上: 设置 -> 连接(Connection) -> 模式选 "remote"，
+   填写 host（Linux 机器的局域网 IP）、port、token，点 Apply & reconnect。
+   连接成功后本机不再启动后端。
+
+4. 选择项目: 点工具栏的项目标签 -> "+ Server project..."，在浏览器里选
+   Linux 机器上的项目目录（项目路径在 server 机器上，不在 Windows 上）。
+
+注意事项:
+- 网络断开时（休眠、断网）server 上的任务会继续跑，GUI 重连后自动恢复
+  显示；GUI 关闭不会取消 server 上的任务。
+- 一个 server 同一时间只服务一个 GUI（新连接会顶掉旧连接）。
+- server 监听 0.0.0.0 时务必设置 token，否则局域网内任何人都能控制 agent。
+- 防火墙需放行 server 机器的 8931 端口（或你指定的端口）。
+
+单机使用（GUI 和代码在同一台机器）不需要这一步，默认 local 模式即可。
 
 五、数据保存在哪里
 ------------------

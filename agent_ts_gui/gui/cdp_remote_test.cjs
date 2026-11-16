@@ -81,6 +81,51 @@ function check(label, ok) {
       return n;
     })()`);
     check("remote dir browser works over remote connection", ls > 0);
+
+    // 5) auto-reconnect: kill the remote server, the GUI must show the banner
+    // and keep trying; restart the server and the GUI must reconnect on its own
+    const { spawn, execSync } = require("child_process");
+    const BACKEND = path.join(__dirname, "..", "backend");
+    const venv = path.join(BACKEND, ".venv", "bin", "python");
+    const srvLog = path.join(os.tmpdir(), "cdp-remote-restart.log");
+    const startSrv = () => {
+      const out = fs.openSync(srvLog, "a");
+      const p = spawn(venv, ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(PORT)],
+        { cwd: BACKEND, detached: true, stdio: ["ignore", out, out] });
+      p.unref();
+    };
+    const stopSrv = () => {
+      try {
+        execSync(`for p in $(ps -eo pid,cmd | awk '/coder_agent.server --host 127.0.0.1 --port ${PORT}/ && !/awk/ {print $1}'); do kill $p 2>/dev/null; done`,
+          { shell: "/bin/bash", stdio: "ignore" });
+      } catch { /* ignore */ }
+    };
+    // the runner owns the server on :8931 when it started it; if not, we own it
+    const srvOwnedHere = process.env.CDP_REMOTE_OWN_SERVER === "1";
+    if (srvOwnedHere) {
+      stopSrv();
+      await wait(1500);
+      let banner = false;
+      for (let i = 0; i < 30; i++) {
+        banner = await evalJs("!!document.getElementById('backend-banner')");
+        if (banner) break;
+        await wait(500);
+      }
+      check("banner shown when the remote server dies", banner);
+      check("auto-reconnect is retrying", appLog().includes("remote ws closed, retry"));
+      // restart the server: the GUI must reconnect without any user action
+      startSrv();
+      let restored = false;
+      for (let i = 0; i < 60; i++) {
+        const b = await evalJs("!!document.getElementById('backend-banner')");
+        if (!b) { restored = true; break; }
+        await wait(500);
+      }
+      check("GUI auto-reconnected after the server came back", restored);
+      stopSrv(); // we started it, we clean up
+    } else {
+      console.log("SKIP  auto-reconnect (server on :8931 is owned by the runner)");
+    }
   } finally {
     cdp.close();
     await killApp(app);
