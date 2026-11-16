@@ -101,19 +101,33 @@ window.api.onReply((msg: ReplyMsg) => {
   else cb(msg.result);
 });
 
-function call(method: string, params: Record<string, any> = {}): Promise<any> {
+function call(method: string, params: Record<string, any> = {}, opts: { waitReady?: boolean } = {}): Promise<any> {
   return new Promise((resolve) => {
+    const send = () => {
+      const p = window.api.send({ id: nextId, method, params });
+      if (p && typeof p.catch === "function") {
+        p.catch((e: any) => {
+          if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: `backend not connected (${e?.message ?? e})` }); }
+        });
+      }
+      setTimeout(() => {
+        if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: "request timed out" }); }
+      }, 120000);
+    };
     nextId += 1;
     pending.set(nextId, resolve);
-    const p = window.api.send({ id: nextId, method, params });
-    if (p && typeof p.catch === "function") {
-      p.catch((e: any) => {
-        if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: `backend not connected (${e?.message ?? e})` }); }
-      });
-    }
-    setTimeout(() => {
-      if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: "request timed out" }); }
-    }, 120000);
+    // the dialog may be opened while the backend is still starting (boot):
+    // wait for a connection URL before sending, so the first RPCs succeed
+    if (opts.waitReady) {
+      const deadline = Date.now() + 35000;
+      const poll = async () => {
+        const u = await window.api.getBackendUrl().catch(() => null);
+        if (u) send();
+        else if (Date.now() < deadline) setTimeout(poll, 300);
+        else send(); // give up waiting; the send's own error/timeout applies
+      };
+      void poll();
+    } else send();
   });
 }
 
@@ -857,13 +871,16 @@ const SETTINGS_TIPS: Record<string, string> = {
 };
 
 async function settingsDialog(initialTab = "model"): Promise<boolean> {
-  const strategiesR = await call("context_strategies");
+  // the dialog may be opened while the backend is still starting / reconnecting
+  // (boot, local<->remote switch): queue these RPCs until the socket is ready,
+  // otherwise the Server/Model fields render empty and Save fails.
+  const strategiesR = await call("context_strategies", {}, { waitReady: true });
   const strategies: string[] = (strategiesR && !strategiesR.__error) ? strategiesR.strategies : ["summarize", "truncate"];
   // no project open yet: fall back to the built-in defaults so the Server /
   // Model fields are editable (saving then writes the user-wide config only)
   let base = S.config;
   if (!base) {
-    const d = await call("default_config");
+    const d = await call("default_config", {}, { waitReady: true });
     base = (d && !d.__error) ? d : null;
   }
   return new Promise((resolve) => {
@@ -1046,6 +1063,11 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
       (cPage.querySelector(".c-port") as HTMLInputElement).value = String(c.port);
       (cPage.querySelector(".c-token") as HTMLInputElement).value = c.token;
     })();
+    // local mode always talks to this machine: keep the host field in sync
+    (cPage.querySelector(".c-mode") as HTMLSelectElement).addEventListener("change", (e) => {
+      if ((e.target as HTMLSelectElement).value === "local")
+        (cPage.querySelector(".c-host") as HTMLInputElement).value = "127.0.0.1";
+    });
     cPage.querySelector(".c-apply")!.addEventListener("click", async () => {
       const m = cPage.querySelector(".msg") as HTMLElement;
       const btn = cPage.querySelector(".c-apply") as HTMLButtonElement;
@@ -1056,6 +1078,8 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
         host: (cPage.querySelector(".c-host") as HTMLInputElement).value.trim() || "127.0.0.1",
         port: Number((cPage.querySelector(".c-port") as HTMLInputElement).value) || 8931,
         token: (cPage.querySelector(".c-token") as HTMLInputElement).value,
+        // the project currently open: the new local backend is started with it
+        root: S.root,
       });
       btn.disabled = false;
       if (!r.ok) { showMsg(cPage, false, String(r.error)); return; }
@@ -2059,15 +2083,47 @@ window.api.onBackendExit((code) => {
   showBackendBanner(code);
 });
 
-// if the backend (re)connects while the banner is up (e.g. it was a false
-// alarm from the boot timeout), dismiss it and open the project again
-window.api.onBackendUrl(async () => {
-  if (!backendDown) return;
-  backendDown = false;
-  const banner = document.getElementById("backend-banner");
-  if (banner) banner.remove();
-  const r = S.root || S.pendingRoot || (await window.api.getBackendRoot());
+// last backend URL we (re)connected to: a change means a new backend process /
+// server (boot, restart, local<->remote switch), so the current project must
+// be re-opened on it (the server-side engine does not survive a switch).
+let lastBackendUrl: string | null = null;
+
+// true once boot() has finished re-opening the project; until then the
+// global backend-url listener must not race with the boot's own openProject.
+let bootProjectDone = false;
+
+// pick the project to (re)open: the remembered last project, then the one
+// queued while the backend was down, then whatever the main process started
+// with. In remote mode a remembered "local" project (path on this machine)
+// cannot be auto-opened: the server lives on another machine.
+async function resolveProjectRoot(): Promise<string | null> {
+  const last = lastProjectName();
+  const savedLast = last ? loadProjects().find((p) => p.name === last) : null;
+  const remoteConn = (await window.api.getConnMode().catch(() => "local")) === "remote";
+  let root: string | null = null;
+  if (savedLast && (!remoteConn || savedLast.mode === "remote")) root = savedLast.path;
+  if (!root) root = S.pendingRoot;
+  if (!root) root = await window.api.getLastProject();
+  if (!root) root = await window.api.getBackendRoot();
   S.pendingRoot = null;
+  return root;
+}
+
+// the backend (re)connected: keep the remote indicator in sync, and if the
+// banner is up (or the connection URL changed) re-open the project on the new
+// backend so a local<->remote switch restores the working session.
+window.api.onBackendUrl(async (url: string) => {
+  void refreshRemoteLabel();
+  if (!bootDone || !bootProjectDone) return; // boot() opens the first project itself
+  const urlChanged = url !== lastBackendUrl;
+  lastBackendUrl = url;
+  if (!backendDown && !urlChanged) return;
+  if (backendDown) {
+    backendDown = false;
+    const banner = document.getElementById("backend-banner");
+    if (banner) banner.remove();
+  }
+  const r = S.root || (await resolveProjectRoot());
   if (!r) { $("state-label").textContent = "Connected"; return; }
   await openProject(r);
   // a turn may have kept running on the server while the link was down
@@ -2103,25 +2159,18 @@ window.api.onBackendUrl(async () => {
   if (!url) {
     showBackendBanner(null);
     $("state-label").textContent = "Backend not running";
+    bootProjectDone = true;
     return;
   }
+  lastBackendUrl = url; // the global listener must not re-open for this connection
   // reopen the last project by its remembered name (falls back to the old
   // plain-path record, then to whatever the main process started with)
-  const last = lastProjectName();
-  const savedLast = last ? loadProjects().find((p) => p.name === last) : null;
-  // in remote mode a remembered "local" project (path on this machine) cannot
-  // be auto-opened: the server lives on another machine
-  const remoteConn = (await window.api.getConnMode().catch(() => "local")) === "remote";
-  let root: string | null = null;
-  if (savedLast && (!remoteConn || savedLast.mode === "remote")) root = savedLast.path;
-  if (!root) root = S.pendingRoot;
-  if (!root) root = await window.api.getLastProject();
-  if (!root) root = await window.api.getBackendRoot();
-  S.pendingRoot = null;
+  const root = await resolveProjectRoot();
   if (root) {
     await openProject(root);
   } else {
     chat.line("No project open yet. Click the Projects button above to choose one.", "c-muted");
     $("state-label").textContent = "No project";
   }
+  bootProjectDone = true;
 })();

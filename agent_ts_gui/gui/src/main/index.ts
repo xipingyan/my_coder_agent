@@ -28,6 +28,9 @@ let backendUrl: string | null = null;
 let backendRoot: string | null = null;
 let window: BrowserWindow | null = null;
 let ws: WebSocket | null = null;
+let wsReady: Promise<void> = Promise.resolve(); // resolves when the current socket is open
+let backendUp = false; // true once a connection is established; false while (re)connecting / down
+let connecting = false; // true while a connectWs() is in flight (RPCs should queue)
 let reconnecting = false; // suppress "backend-exit" while switching connections
 let remoteReconnect = false; // auto-reconnect is active for the current remote connection
 let reconnectTimer: NodeJS.Timeout | null = null;
@@ -131,17 +134,28 @@ function closeWs() {
 
 function connectWs(url: string, token = ""): Promise<void> {
   closeWs();
+  backendUp = false; // a new connection is in flight
+  connecting = true;
   const socket = new WebSocket(url);
   ws = socket;
-  // resolves once the socket is open, so callers can send RPCs immediately
+  // resolves once the socket is open, so callers can send RPCs immediately.
+  // wsReady is what the ws-send IPC handler awaits: RPCs arriving while the
+  // (re)connect is in flight must queue here instead of failing with
+  // "backend not connected". It ALWAYS resolves (the handler then checks
+  // backendUp), so a failed connect can never hang a queued RPC.
+  let resolveReady: () => void;
+  wsReady = new Promise<void>((res) => { resolveReady = res; });
   const opened = new Promise<void>((resolve, reject) => {
     socket.once("open", () => {
       console.log("[main] ws connected");
       // token handshake: must be the very first frame when the server requires one
       if (token) { try { socket.send(JSON.stringify({ token })); } catch { /* ignore */ } }
+      backendUp = true;
+      connecting = false;
+      resolveReady();
       resolve();
     });
-    socket.once("error", (e) => reject(e));
+    socket.once("error", (e) => { connecting = false; resolveReady(); reject(e); });
   });
   opened.catch(() => { /* close follows */ });
   socket.on("message", (data) => {
@@ -157,7 +171,7 @@ function connectWs(url: string, token = ""): Promise<void> {
     // deliberately closeWs() (switching connections / restarting), ws is already
     // null, so a replaced socket's close event must not start reconnecting.
     const isCurrent = ws === socket;
-    if (isCurrent) ws = null;
+    if (isCurrent) { ws = null; backendUp = false; }
     if (isCurrent && remoteReconnect && !quitting) {
       if (window && !window.isDestroyed()) window.webContents.send("backend-exit", null);
       console.log(`[main] remote ws closed, retry in ${reconnectDelay}ms`);
@@ -284,7 +298,12 @@ app.whenReady().then(() => {
   ipcMain.handle("backend-url", () => backendUrl);
   ipcMain.handle("backend-root", () => backendRoot);
   ipcMain.handle("app-version", () => app.getVersion());
-  ipcMain.handle("ws-send", (_e, payload: object) => {
+  ipcMain.handle("ws-send", async (_e, payload: object) => {
+    // queue RPCs that arrive while the (re)connect is in flight (boot,
+    // restart, local<->remote switch) instead of failing immediately.
+    // If the backend is down (and no connect/reconnect is in flight) fail fast.
+    if (!connecting && !backendUp && !remoteReconnect) throw new Error("backend not connected");
+    await wsReady;
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("backend not connected");
     ws.send(JSON.stringify(payload));
   });
@@ -351,7 +370,14 @@ app.whenReady().then(() => {
         reconnectDelay = 1000;
         await connectWs(url, next.token);
       } else {
-        url = await startBackend(backendRoot ?? lastProject());
+        // switch to local: start the bundled backend with the project the GUI
+        // has open (c.root, sent by the renderer) so it is ready to re-open it
+        const root = (typeof c.root === "string" && c.root) || backendRoot || lastProject();
+        url = await startBackend(root);
+        backendRoot = root;
+        // startBackend only spawns the process and reads its WS_URL; the socket
+        // must be opened here too, or every RPC fails with "backend not connected"
+        await connectWs(url);
       }
       backendUrl = url;
       if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);
@@ -391,6 +417,8 @@ app.whenReady().then(() => {
       } else {
         url = await startBackend(r);
         backendRoot = r;
+        // same as doSetConnection: startBackend does not open the socket
+        await connectWs(url);
       }
       backendUrl = url;
       if (window && !window.isDestroyed()) window.webContents.send("backend-url", url);

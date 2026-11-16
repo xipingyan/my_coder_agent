@@ -26,6 +26,7 @@ const SUITES = {
   theme: "cdp_theme_test.cjs",
   restart_close: "cdp_restart_close_test.cjs",
   remote: "cdp_remote_test.cjs",
+  conn_switch: "cdp_conn_switch_test.cjs",
 };
 
 function pick() {
