@@ -114,8 +114,25 @@ Fix in the launch script (e.g. `start_gui.sh`), Linux only:
 2. Launch with `electron --class=MyApp .` so the WM_CLASS matches `StartupWMClass`.
 
 Notes:
-- GNOME caches icons: the dock may keep the old icon until logout/login (or `killall
-  gnome-shell` on Xorg). Not a bug in your setup.
+- GNOME caches icons in TWO layers, and both must be refreshed after regenerating
+  the PNG:
+  1. **Disk caches** (`~/.cache/gtk-3.0/icon-theme.cache`,
+     `~/.cache/gtk-4.0/icon-theme.cache`, `~/.cache/gnome-shell/icon-cache`).
+     Cheap to clear - do it automatically in the launch script after writing the
+     `.desktop` entry:
+     ```sh
+     rm -f "$HOME/.cache/gtk-3.0/icon-theme.cache" \
+           "$HOME/.cache/gtk-4.0/icon-theme.cache" \
+           "$HOME/.cache/gnome-shell/icon-cache" 2>/dev/null || true
+     ```
+  2. **gnome-shell's in-memory cache**: it loads the `.desktop` icon at session
+     start and never re-reads the file. Clearing the disk caches and restarting the
+     app are NOT enough - the dock keeps the old icon until the shell itself is
+     restarted. This is the layer people usually miss.
+- So after changing the icon: clear disk caches (automated) AND restart the shell:
+  - **Xorg** (`XDG_SESSION_TYPE=x11`): `killall gnome-shell` - the screen flashes
+    back to the login screen for a moment, then the session returns. Works, verified.
+  - **Wayland**: `killall gnome-shell` does not work (no X); logout/login instead.
 - Packaged AppImage needs none of this: electron-builder generates the `.desktop` with
   the icon from `linux.icon`.
 
@@ -126,4 +143,6 @@ Notes:
 3. All icon files visible in `git status` (gitignore un-ignored).
 4. `BrowserWindow` icon path exists in dev; `extraResources` + `linux/win.icon` set for packaging.
 5. Linux dev launch: `.desktop` entry installed AND `--class=` matches `StartupWMClass`.
-6. Boot the app: dock/taskbar shows the new icon (after session refresh if cached).
+6. Boot the app: dock/taskbar shows the new icon. If it doesn't, the disk caches
+   were cleared but gnome-shell still holds the old icon in memory - `killall
+   gnome-shell` (Xorg) or logout/login (Wayland).
