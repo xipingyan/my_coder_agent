@@ -64,11 +64,15 @@ echo )
 echo set PORT=%%2
 echo if "%%PORT%%"=="" set PORT=8931
 echo set TOKEN=%%3
-echo if "%%TOKEN%%"=="" (
-echo   set ARGS=--host 0.0.0.0 --port %%PORT%%
-echo ) else (
-echo   set ARGS=--host 0.0.0.0 --port %%PORT%% --token %%TOKEN%%
+echo if "%%TOKEN%%"=="" if exist "%%~dp0coder-agent-server.token" (
+echo   set /p TOKEN=<"%%~dp0coder-agent-server.token"
 echo )
+echo if "%%TOKEN%%"=="" (
+echo   for /f %%t in ('powershell -NoProfile -Command "('{0:x16}' -f (Get-Random))"') do set TOKEN=%%t
+echo   echo %%TOKEN%%>"%%~dp0coder-agent-server.token"
+echo   echo generated a new token (saved to %%~dp0coder-agent-server.token)
+echo )
+echo set ARGS=--host 0.0.0.0 --port %%PORT%% --token %%TOKEN%%
 echo for /f "tokens=2 delims=:" %%p in ('wmic process call create "%%~dp0%%BIN%% %%ARGS%%" ^| findstr "ProcessId "') do (
 echo   echo %%p^>%%PIDFILE%%
 echo   echo coder-agent-server started (pid %%p^)

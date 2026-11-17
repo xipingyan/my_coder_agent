@@ -1764,6 +1764,87 @@ async function openProjectNamed(name: string, mode: "local" | "remote", path: st
   openProject(path);
 }
 
+// "user@host:~/path" is the ssh-style way users write remote paths; the
+// host part is already the connection config, so only the path after the
+// last colon is sent to the server.
+function remoteBasePath(s: string): string {
+  const i = s.lastIndexOf(":");
+  if (i > 0 && s.slice(0, i).includes("@")) return s.slice(i + 1);
+  return s;
+}
+
+// remote "add project": a text input (the fast path - most users know the
+// path on the server) validated through the list_dir RPC, with the directory
+// browser as a "Browse..." fallback. No password here: the connection's
+// token (Settings > Connection) is what authenticates against the server.
+const lastRemotePath = (): string | null => {
+  const last = lastProjectName();
+  if (!last) return null;
+  const p = loadProjects().find((x) => x.name === last && x.mode === "remote");
+  return p ? p.path : null;
+};
+
+function addRemoteProject(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const bd = document.createElement("div");
+    bd.className = "modal-backdrop stacked show";
+    bd.innerHTML =
+      `<div class="modal prompt"><div class="head">Add project (on the server machine)</div>` +
+      `<div class="body"><div class="field"><input type="text" class="rpath" placeholder="~/mygitee/tmp"/></div>` +
+      `<div class="tip" style="font-size:11px;color:var(--text-soft2);margin-top:6px">Path on the machine the agent server runs on. ` +
+      `"user@host:~/path" is accepted too - only the path part is used.</div>` +
+      `<div class="msg"></div></div>` +
+      `<div class="foot"><button class="browse">Browse...</button><span class="flex1"></span>` +
+      `<button class="no">Cancel</button><button class="primary yes">Add</button></div></div>`;
+    document.body.appendChild(bd);
+    const input = bd.querySelector<HTMLInputElement>(".rpath")!;
+    const msg = bd.querySelector(".msg")!;
+    const addBtn = bd.querySelector(".yes")!;
+    const browseBtn = bd.querySelector(".browse")!;
+    input.focus();
+    let busy = false;
+    const close = () => { bd.remove(); };
+
+    async function validate(): Promise<string | null> {
+      const raw = input.value.trim();
+      if (!raw) { msg.className = "msg err"; msg.textContent = "Enter a path first."; return null; }
+      const p = remoteBasePath(raw);
+      const r = await call("list_dir", { path: p });
+      if (r && r.__error) {
+        msg.className = "msg err";
+        msg.textContent = `Not a directory on the server: ${p}\n${r.__error}`;
+        return null;
+      }
+      msg.className = "msg"; msg.textContent = "";
+      return r.path;
+    }
+
+    async function doAdd() {
+      if (busy) return;
+      busy = true;
+      addBtn.disabled = true;
+      addBtn.textContent = "Checking...";
+      const dir = await validate();
+      busy = false;
+      addBtn.disabled = false;
+      addBtn.textContent = "Add";
+      if (!dir) return;
+      close();
+      resolve(dir);
+    }
+    addBtn.addEventListener("click", () => void doAdd());
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") void doAdd(); });
+    browseBtn.addEventListener("click", async () => {
+      browseBtn.disabled = true;
+      const dir = await browseRemoteDir(input.value.trim());
+      browseBtn.disabled = false;
+      if (dir) input.value = dir;
+    });
+    bd.querySelector(".no")!.addEventListener("click", () => { close(); resolve(null); });
+    if (lastRemotePath()) input.value = lastRemotePath()!;
+  });
+}
+
 // remote directory browser: a simple path bar + entry list via the list_dir RPC
 function browseRemoteDir(initial: string): Promise<string | null> {
   return new Promise((resolve) => {
@@ -1796,7 +1877,7 @@ function browseRemoteDir(initial: string): Promise<string | null> {
       });
     }
 
-    pathbar.addEventListener("keydown", (e) => { if (e.key === "Enter") void load(pathbar.value.trim() || cur); });
+    pathbar.addEventListener("keydown", (e) => { if (e.key === "Enter") void load(remoteBasePath(pathbar.value.trim()) || cur); });
     modal.querySelector(".up")!.addEventListener("click", () => {
       const parent = cur.replace(/[\\/][^\\/]+$/, "");
       if (parent && parent !== cur) void load(parent);
@@ -1804,7 +1885,7 @@ function browseRemoteDir(initial: string): Promise<string | null> {
     modal.querySelector(".yes")!.addEventListener("click", () => { $("modal-backdrop").classList.remove("show"); resolve(cur); });
     modal.querySelector(".no")!.addEventListener("click", () => { $("modal-backdrop").classList.remove("show"); resolve(null); });
     $("modal-backdrop").classList.add("show");
-    void load(initial);
+    void load(remoteBasePath(initial));
   });
 }
 
@@ -1824,7 +1905,7 @@ async function projectsDialog(): Promise<void> {
     `<div class="btnrow"><button class="add-project">+ Add project...</button>` +
     `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
     `<div class="tip" style="font-size:11px;color:var(--text-soft2)">${remoteMode
-      ? "Projects live on the machine the agent server runs on (browsed over the connection). "
+      ? "Projects live on the machine the agent server runs on (type the path, e.g. ~/mygitee/tmp). "
       : "Projects live on this machine (native folder dialog). "}Projects are remembered by name.</div></div>` +
     `<div class="foot"><button class="open">Open</button><span class="flex1"></span><button class="primary yes">Close</button></div>`;
   const listEl = modal.querySelector(".projlist")!;
@@ -1863,12 +1944,13 @@ async function projectsDialog(): Promise<void> {
   });
 
   // add a project for the current connection mode: native folder picker in
-  // local mode, remote directory browser in remote mode. The saved project's
-  // mode is the connection mode, so it only shows in the matching dialog.
+  // local mode, path text input (validated via list_dir, with the directory
+  // browser as fallback) in remote mode. The saved project's mode is the
+  // connection mode, so it only shows in the matching dialog.
   modal.querySelector(".add-project")!.addEventListener("click", async () => {
     let dir: string | null = null;
     if (remoteMode) {
-      dir = await browseRemoteDir("");
+      dir = await addRemoteProject();
     } else {
       // __pickDirectory is a CDP-test hook (see window.__onEvent); defaults to
       // the native picker, which a headless test cannot drive.

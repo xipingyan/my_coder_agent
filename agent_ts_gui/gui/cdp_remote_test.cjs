@@ -67,20 +67,42 @@ function check(label, ok) {
     check("connection tab shows remote", c.mode === "remote");
     check("connection tab host/port", c.host === "127.0.0.1" && String(c.port) === String(PORT));
 
-    // 4) list_dir goes over the remote connection
+    // 4) add-project in remote mode: a text input validated via the list_dir
+    // RPC (over the remote connection). A bad path must show an error; a
+    // valid one (with an ssh-style user@host: prefix) must proceed to the
+    // name prompt.
     const ls = await evalJs(`(async () => {
-      // quick direct RPC via the app's internal call() is not exposed; use the projects dialog browser instead
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
       document.getElementById('root-label').click();
-      await new Promise(r => setTimeout(r, 200));
+      await sleep(300);
       document.querySelector('#modal .add-project').click();
-      await new Promise(r => setTimeout(r, 1500));
-      const n = document.querySelectorAll('#modal .dirent').length;
-      document.querySelector('#modal .no').click();
-      await new Promise(r => setTimeout(r, 200));
+      await sleep(400);
+      const input = document.querySelector('.modal-backdrop.stacked .rpath');
+      const inputUp = !!input && input.placeholder === '~/mygitee/tmp';
+      // bad path: list_dir over the remote connection must reject it
+      input.value = '/no/such/dir/xyz';
+      document.querySelector('.modal-backdrop.stacked .yes').click();
+      await sleep(1500);
+      const errShown = (document.querySelector('.modal-backdrop.stacked .msg') || {}).textContent || '';
+      // good path with an ssh-style prefix: host part is stripped
+      input.value = 'xiping@xiping-home-nv:~';
+      document.querySelector('.modal-backdrop.stacked .yes').click();
+      await sleep(1500);
+      // the name prompt (stacked on top of the add-project modal) must be up
+      const stacked = () => [...document.querySelectorAll('.modal-backdrop.stacked')];
+      const promptUp = !!stacked().some(b => b.querySelector('.pinput'));
+      const promptVal = stacked().map(b => b.querySelector('.pinput')?.value).find(v => v !== undefined);
+      // cancel the name prompt, then the add-project modal, then the projects dialog
+      [...stacked().reverse()].forEach(b => b.querySelector('.no')?.click());
+      await sleep(200);
+      // close the projects dialog
       document.querySelector('#modal .yes').click();
-      return n;
+      return JSON.stringify({ inputUp, errShown, promptUp, promptVal });
     })()`);
-    check("remote dir browser works over remote connection", ls > 0);
+    const r4 = JSON.parse(ls);
+    check("remote add-project shows a path text input with example placeholder", r4.inputUp);
+    check("bad path rejected via list_dir over the remote connection", /not a directory/i.test(r4.errShown));
+    check("valid ssh-style path (user@host:~) proceeds to the name prompt", r4.promptUp && r4.promptVal === "xiping");
 
     // 5) auto-reconnect: kill the remote server, the GUI must show the banner
     // and keep trying; restart the server and the GUI must reconnect on its own

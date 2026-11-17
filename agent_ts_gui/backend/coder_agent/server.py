@@ -257,7 +257,11 @@ class Server:
 
     # -------------------------------------------------------------- methods
     def open_project(self, p: dict) -> dict:
-        root = Path(p.get("root") or (self.root or Path.cwd())).resolve()
+        # expanduser: the GUI's remote project picker accepts "~" paths
+        root = Path(p.get("root") or (self.root or Path.cwd())).expanduser().resolve()
+        if not root.is_dir():
+            raise NotADirectoryError(
+                f"project path does not exist on this machine: {root}")
         session_id = p.get("session_id")
         # Idempotent: re-opening the project the server already has (no
         # session switch requested) must NOT rebuild the engine - a GUI

@@ -12,6 +12,7 @@ Linux（./release.sh 生成）:
   coder-agent-server-<ver>.linux    独立 server（仅远程部署需要）
   coder-agent-server.sh             server 后台启动脚本（同上）
   coder-agent-server.service        可选：systemd 服务模板
+  coder-agent-server.token          启动脚本生成的连接 token（远程部署时出现）
   guide.txt                         本说明
 
 Windows（Windows 上 release.bat 生成）:
@@ -37,14 +38,18 @@ Windows（Windows 上 release.bat 生成）:
 三、远程部署（GUI 与 server 分机）
 ----------------------------------
 1. server 机器（Linux）后台启动:
-     /path/to/release/coder-agent-server.sh start 8931 <token>
-   - 默认端口 8931；token 建议设置（openssl rand -hex 16 生成）
+     /path/to/release/coder-agent-server.sh start
+   - 默认端口 8931。不传 token 时脚本自动生成一个，
+     打印在启动输出里，并存到同目录 coder-agent-server.token（权限 600）；
+     下次 start 自动复用，token 不会变。
+     想自己指定: start 8931 <token>（生成: openssl rand -hex 16）
    - 日志/状态: coder-agent-server.log / coder-agent-server.pid（同目录）
    - 停止: coder-agent-server.sh stop
    - 一台机器只能跑一个 server: 已有实例时再 start 会报错退出
    - 登录自动启动（放 bashrc）:
-       echo '/path/to/release/coder-agent-server.sh start 8931 <token>' >> ~/.bashrc
-     （server 已在跑时登录只打印一行警告，不会起第二个）
+       echo '/path/to/release/coder-agent-server.sh start' >> ~/.bashrc
+     （token 已存在 .token 文件里会自动复用；server 已在跑时登录
+     只打印一行警告，不会起第二个）
    - 长期运行也可用 systemd: 改好 coder-agent-server.service 的
      User/ExecStart/token 后
        sudo cp coder-agent-server.service /etc/systemd/system/
@@ -52,8 +57,11 @@ Windows（Windows 上 release.bat 生成）:
 2. server 机器上配置 LLM: 用同机 GUI 的 设置 -> Model 保存
    （配置存 server 机器的 ~/.coder_agent/config.toml）。
 3. GUI 机器: 设置 -> Connection -> 模式 "remote"，填 host（server 的 IP）、
-   port、token，Apply & reconnect。
-4. 选项目: 工具栏 -> "+ Server project..."（路径在 server 机器上）。
+   port、token（启动脚本打印的那个，或 cat coder-agent-server.token 查看），
+   Apply & reconnect。
+4. 选项目: 工具栏点项目名 -> "+ Add project..."，直接输入 server 机器上的
+   路径（如 ~/mygitee/tmp，也接受 user@host:~/path 写法），
+   或点 Browse... 浏览 server 目录。
 
 注意:
 - 断网/休眠时 server 上的任务继续跑，GUI 重连后自动恢复。

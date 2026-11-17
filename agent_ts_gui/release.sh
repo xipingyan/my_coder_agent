@@ -91,11 +91,22 @@ start)
     fi
     PORT="${2:-8931}"
     TOKEN="${3:-}"
-    ARGS=(--host 0.0.0.0 --port "$PORT")
-    [ -n "$TOKEN" ] && ARGS+=(--token "$TOKEN")
+    TOKENFILE="$(pwd)/coder-agent-server.token"
+    if [ -z "$TOKEN" ] && [ -f "$TOKENFILE" ]; then
+        TOKEN="$(cat "$TOKENFILE")"
+    fi
+    if [ -z "$TOKEN" ]; then
+        TOKEN="$(head -c 16 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+        [ -n "$TOKEN" ] || TOKEN="token-$(date +%s)-$$"
+        printf '%s' "$TOKEN" > "$TOKENFILE"
+        chmod 600 "$TOKENFILE"
+        echo "generated a new token (saved to $TOKENFILE)"
+    fi
+    ARGS=(--host 0.0.0.0 --port "$PORT" --token "$TOKEN")
     nohup "./$BIN" "${ARGS[@]}" >>"$LOG" 2>&1 &
     echo $! > "$PIDFILE"
     echo "coder-agent-server started (pid $!, log $LOG)"
+    echo "token: $TOKEN   <- put this into the GUI: Settings > Connection"
     ;;
 *)
     echo "usage: $0 [start [port] [token] | stop]" >&2
