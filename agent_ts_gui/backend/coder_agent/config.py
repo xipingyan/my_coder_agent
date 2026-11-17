@@ -74,6 +74,10 @@ class PathsConfig(BaseModel):
     prompt_dirs: list[str] = Field(default_factory=list)  # extra task-prefix dirs
 
 
+class DebugConfig(BaseModel):
+    prompt_dump: bool = False  # write every request sent to the LLM server to disk
+
+
 class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     thinking: ThinkingConfig = Field(default_factory=ThinkingConfig)
@@ -82,6 +86,7 @@ class AppConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    debug: DebugConfig = Field(default_factory=DebugConfig)
 
 
 # ------------------------------------------------------------------ loading

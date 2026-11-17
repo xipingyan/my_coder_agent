@@ -869,7 +869,54 @@ const SETTINGS_TIPS: Record<string, string> = {
   planner_thinking: "Allow thinking while planning (slower)",
   doc_analysis: "Summarise relevant MODULE.md files before each subtask",
   confirm_each_stage: "Ask for confirmation after every stage",
+  prompt_dump: "Write every request sent to the LLM server to a JSON file (Settings > Debug > View dumps)",
+  api_key: "Auth key for the LLM server (OpenAI-compatible endpoints). Previously used keys are offered as suggestions; stored locally in this app only.",
 };
+
+// ------------------------------------------------- prompt dumps viewer
+async function openDumpsDialog(): Promise<void> {
+  const bd = document.createElement("div");
+  bd.className = "modal-backdrop stacked show";
+  bd.innerHTML =
+    `<div class="modal dumps">` +
+    `<div class="head">Prompt dumps <span style="font-weight:normal;color:var(--text-soft2)" class="ddir"></span></div>` +
+    `<div class="dbody"><div class="dlist"></div><div class="dview"><pre class="muted" style="border:none;background:none;padding:0">select a dump on the left</pre></div></div>` +
+    `<div class="foot"><button class="d-refresh">&#10227; Refresh</button><span class="flex1"></span><button class="no">Close</button></div>` +
+    `</div>`;
+  document.body.appendChild(bd);
+  const list = bd.querySelector(".dlist")!;
+  const view = bd.querySelector(".dview")!;
+  const close = () => bd.remove();
+  bd.querySelector(".no")!.addEventListener("click", close);
+  bd.addEventListener("click", (e) => { if (e.target === bd) close(); });
+
+  async function load() {
+    const r = await call("prompt_dumps", {}, { waitReady: true });
+    if (r && r.__error) { list.innerHTML = `<div class="drow">error: ${esc(String(r.__error))}</div>`; return; }
+    bd.querySelector(".ddir")!.textContent = r.dir;
+    list.innerHTML = "";
+    if (!r.files.length) { list.innerHTML = `<div class="drow muted" style="cursor:default">no dumps yet (enable in Settings &gt; Debug)</div>`; return; }
+    for (const f of r.files) {
+      const row = document.createElement("div");
+      row.className = "drow";
+      const kb = (f.size / 1024).toFixed(1) + " KB";
+      const ts = new Date(f.mtime * 1000).toLocaleString();
+      row.innerHTML = `<div class="dname">${esc(f.name)}</div><div class="dmeta">${kb} &middot; ${esc(ts)}</div>`;
+      row.addEventListener("click", async () => {
+        list.querySelectorAll(".drow").forEach((x) => x.classList.remove("sel"));
+        row.classList.add("sel");
+        view.innerHTML = `<pre class="muted" style="border:none;background:none;padding:0">loading...</pre>`;
+        const c = await call("prompt_dump_content", { name: f.name });
+        if (c && c.__error) { view.innerHTML = `<pre style="border:none">error: ${esc(String(c.__error))}</pre>`; return; }
+        view.innerHTML = `<pre></pre>`;
+        view.querySelector("pre")!.textContent = c.text;
+      });
+      list.appendChild(row);
+    }
+  }
+  bd.querySelector(".d-refresh")!.addEventListener("click", () => void load());
+  void load();
+}
 
 async function settingsDialog(initialTab = "model"): Promise<boolean> {
   // the dialog may be opened while the backend is still starting / reconnecting
@@ -890,8 +937,8 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
     modal.innerHTML =
       `<div class="head">Settings</div>` +
       `<div class="settings">` +
-      `<div class="tabs"><button data-p="model"${initialTab === "model" ? " class=\"active\"" : ""}>Model</button><button data-p="context"${initialTab === "context" ? " class=\"active\"" : ""}>Context &amp; agent</button><button data-p="prompts"${initialTab === "prompts" ? " class=\"active\"" : ""}>Task prompts</button><button data-p="approval"${initialTab === "approval" ? " class=\"active\"" : ""}>Approval</button><button data-p="connection"${initialTab === "connection" ? " class=\"active\"" : ""}>Remote server</button><button data-p="appearance"${initialTab === "appearance" ? " class=\"active\"" : ""}>Appearance</button><button class="close-x" title="Close">&#10005;</button></div>` +
-      `<div class="pages"><div class="page${initialTab === "model" ? " active" : ""}" data-p="model"></div><div class="page${initialTab === "context" ? " active" : ""}" data-p="context"></div><div class="page${initialTab === "prompts" ? " active" : ""}" data-p="prompts"></div><div class="page${initialTab === "approval" ? " active" : ""}" data-p="approval"></div><div class="page${initialTab === "connection" ? " active" : ""}" data-p="connection"></div><div class="page${initialTab === "appearance" ? " active" : ""}" data-p="appearance"></div></div>` +
+      `<div class="tabs"><button data-p="model"${initialTab === "model" ? " class=\"active\"" : ""}>Model</button><button data-p="context"${initialTab === "context" ? " class=\"active\"" : ""}>Context &amp; agent</button><button data-p="prompts"${initialTab === "prompts" ? " class=\"active\"" : ""}>Task prompts</button><button data-p="approval"${initialTab === "approval" ? " class=\"active\"" : ""}>Approval</button><button data-p="connection"${initialTab === "connection" ? " class=\"active\"" : ""}>Remote server</button><button data-p="appearance"${initialTab === "appearance" ? " class=\"active\"" : ""}>Appearance</button><button data-p="debug"${initialTab === "debug" ? " class=\"active\"" : ""}>Debug</button><button class="close-x" title="Close">&#10005;</button></div>` +
+      `<div class="pages"><div class="page${initialTab === "model" ? " active" : ""}" data-p="model"></div><div class="page${initialTab === "context" ? " active" : ""}" data-p="context"></div><div class="page${initialTab === "prompts" ? " active" : ""}" data-p="prompts"></div><div class="page${initialTab === "approval" ? " active" : ""}" data-p="approval"></div><div class="page${initialTab === "connection" ? " active" : ""}" data-p="connection"></div><div class="page${initialTab === "appearance" ? " active" : ""}" data-p="appearance"></div><div class="page${initialTab === "debug" ? " active" : ""}" data-p="debug"></div></div>` +
       `</div>` +
       `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Save</button></div>`;
 
@@ -975,6 +1022,48 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
       };
       updateModelDl();
       providerSel.addEventListener("change", () => updateModelDl?.());
+    }
+
+    // ---- base_url history (localStorage): quick-pick previously used URLs
+    const BASE_URL_HIST_KEY = "agent_ts_gui.base_url_history";
+    function baseUrlHistory(): string[] {
+      try { return JSON.parse(localStorage.getItem(BASE_URL_HIST_KEY) ?? "[]"); } catch { return []; }
+    }
+    function recordBaseUrl(url: string) {
+      if (!url) return;
+      const list = baseUrlHistory();
+      localStorage.setItem(BASE_URL_HIST_KEY, JSON.stringify([url, ...list.filter((x) => x !== url)].slice(0, 50)));
+    }
+    const baseUrlInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="base_url"]');
+    if (baseUrlInput) {
+      baseUrlInput.setAttribute("list", "baseurl-dl");
+      const urlDl = modelPage.ownerDocument.createElement("datalist");
+      urlDl.id = "baseurl-dl";
+      modelPage.appendChild(urlDl);
+      const cur = baseUrlInput.value.trim();
+      const opts = cur && !baseUrlHistory().includes(cur) ? [cur, ...baseUrlHistory()] : baseUrlHistory();
+      urlDl.innerHTML = opts.map((u) => `<option value="${esc(u)}"></option>`).join("");
+    }
+
+    // ---- api_key history (localStorage): quick-pick previously used keys
+    const API_KEY_HIST_KEY = "agent_ts_gui.api_key_history";
+    function apiKeyHistory(): string[] {
+      try { return JSON.parse(localStorage.getItem(API_KEY_HIST_KEY) ?? "[]"); } catch { return []; }
+    }
+    function recordApiKey(key: string) {
+      if (!key) return;
+      const list = apiKeyHistory();
+      localStorage.setItem(API_KEY_HIST_KEY, JSON.stringify([key, ...list.filter((x) => x !== key)].slice(0, 50)));
+    }
+    const apiKeyInput = modelPage.querySelector<HTMLInputElement>('[data-s="server"][data-k="api_key"]');
+    if (apiKeyInput) {
+      apiKeyInput.setAttribute("list", "apikey-dl");
+      const keyDl = modelPage.ownerDocument.createElement("datalist");
+      keyDl.id = "apikey-dl";
+      modelPage.appendChild(keyDl);
+      const cur = apiKeyInput.value.trim();
+      const opts = cur && !apiKeyHistory().includes(cur) ? [cur, ...apiKeyHistory()] : apiKeyHistory();
+      keyDl.innerHTML = opts.map((k) => `<option value="${esc(k)}"></option>`).join("");
     }
 
     const ctxPage = modal.querySelector<HTMLElement>('.page[data-p="context"]')!;
@@ -1112,6 +1201,41 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
       localStorage.setItem(THEME_KEY, id);
     });
 
+    // ---- debug tab (prompt dumps: every request sent to the LLM server)
+    const dPage = modal.querySelector<HTMLElement>('.page[data-p="debug"]')!;
+    dPage.innerHTML =
+      group("debug", "Prompt dump") +
+      `<div class="btnrow"><button class="d-view">View dumps</button><button class="d-clear">Clear all</button></div>` +
+      `<div class="dpath" style="font-size:12px;color:var(--text-soft);margin-bottom:6px"></div>` +
+      `<div class="msg"></div>` +
+      `<div class="tip" style="font-size:11px;color:var(--text-soft2)">When enabled, every request sent to the LLM server ` +
+      `(full messages, tools, sampling params) is written to a JSON file in the dump directory. ` +
+      `Files are numbered in call order and labelled with the agent (main / planner / sub:N). ` +
+      `The switch takes effect after Save.</div>`;
+    void (async () => {
+      const r = await call("prompt_dumps", {}, { waitReady: true });
+      if (r && !r.__error) (dPage.querySelector(".dpath") as HTMLElement).textContent = `Dump directory: ${r.dir}`;
+    })();
+    dPage.querySelector(".d-view")!.addEventListener("click", () => void openDumpsDialog());
+    // standalone confirm: confirmModal() reuses #modal and would destroy this dialog
+    dPage.querySelector(".d-clear")!.addEventListener("click", () => {
+      const m = dPage.querySelector(".msg") as HTMLElement;
+      const bd = document.createElement("div");
+      bd.className = "modal-backdrop stacked show";
+      bd.innerHTML = `<div class="modal prompt"><div class="head">Clear prompt dumps</div>` +
+        `<div class="body">Delete all dump files?</div>` +
+        `<div class="foot"><button class="no">Cancel</button><button class="primary yes">Clear</button></div></div>`;
+      document.body.appendChild(bd);
+      const done = () => bd.remove();
+      bd.querySelector(".no")!.addEventListener("click", done);
+      bd.querySelector(".yes")!.addEventListener("click", async () => {
+        done();
+        const r = await call("clear_prompt_dumps");
+        if (r && r.__error) { m.className = "msg err"; m.textContent = String(r.__error); return; }
+        m.className = "msg ok"; m.textContent = `Deleted ${r.deleted} file(s).`;
+      });
+    });
+
     // ---- tabs
     modal.querySelectorAll(".settings .tabs button[data-p]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -1163,7 +1287,10 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
       m.className = "msg"; m.textContent = "Testing...";
       const r = await call("test_connection", { config: collect() });
       if (r && r.__error) { showMsg(modelPage, false, String(r.__error)); return; }
-      const provider = collect().server?.provider ?? "";
+      const c = collect();
+      const provider = c.server?.provider ?? "";
+      recordBaseUrl(c.server?.base_url ?? "");
+      recordApiKey(c.server?.api_key ?? "");
       for (const m of r.models ?? []) recordModel(provider, m);
       updateModelDl?.();
       showMsg(modelPage, true, `Models:\n${(r.models ?? []).join("\n")}\n\n${r.context_text ?? ""}`);
@@ -1203,6 +1330,8 @@ async function settingsDialog(initialTab = "model"): Promise<boolean> {
         }
         S.config = collect();
         recordModel(S.config.server?.provider ?? "", S.config.server?.model ?? "");
+        recordBaseUrl(S.config.server?.base_url ?? "");
+        recordApiKey(S.config.server?.api_key ?? "");
         S.taskTypes = r.task_types ?? S.taskTypes;
         S.effort = S.config.thinking?.effort ?? S.effort;
         S.ctxMax = S.config.context?.max_tokens ?? S.ctxMax;

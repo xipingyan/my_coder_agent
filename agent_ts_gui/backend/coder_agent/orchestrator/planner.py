@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..knowledge import module_index
 from ..llm import LLMProvider
+from ..llm.prompt_dump import set_agent_id
 from ..prompts import TaskTypeRegistry
 from .models import Plan, PlanError
 
@@ -65,6 +66,7 @@ class Planner:
         return "\n".join(lines)
 
     def make_plan(self, goal: str) -> Plan:
+        set_agent_id("planner")
         types = ", ".join(self.types.names())
         messages = [
             {"role": "system", "content": PLANNER_SYSTEM.format(max_subtasks=self.max_subtasks, types=types)},

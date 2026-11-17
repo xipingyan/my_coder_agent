@@ -15,6 +15,7 @@ from .config import AgentConfig, ThinkingConfig
 from .context import ContextManager
 from .events import EventBus
 from .llm import LLMCancelled, LLMError, LLMProvider, ToolCall, extract_text_tool_calls
+from .llm.prompt_dump import set_agent_id
 from .tools.base import ToolContext, ToolRegistry
 from .util import truncate_middle
 
@@ -74,6 +75,7 @@ class Agent:
         cancel: threading.Event,
     ) -> None:
         self.id = agent_id
+        set_agent_id(agent_id)  # labelled in prompt dumps (thread-local)
         self.provider = provider
         self.registry = registry
         self.tool_ctx = tool_ctx

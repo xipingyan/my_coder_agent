@@ -11,6 +11,7 @@ from typing import Optional
 from ..events import EventBus
 from ..knowledge import IndexEntry, module_index
 from ..llm import LLMProvider
+from ..llm.prompt_dump import set_agent_id
 from ..paths import project_cache_dir
 from .models import SubTask
 
@@ -71,6 +72,7 @@ class DocAnalyzer:
 
     # --------------------------------------------------------------- analysis
     def analyze(self, st: SubTask, agent_id: str) -> str:
+        set_agent_id(agent_id)
         docs = self.relevant_docs(st)
         if not docs:
             return ""

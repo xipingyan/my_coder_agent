@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from ..config import AppConfig
@@ -28,7 +29,11 @@ def create_provider(cfg: AppConfig) -> LLMProvider:
 
 
 def _openai_compat(cfg: AppConfig) -> LLMProvider:
-    return OpenAICompatProvider(cfg.server, cfg.thinking, cfg.sampling)
+    return OpenAICompatProvider(
+        cfg.server, cfg.thinking, cfg.sampling,
+        dump=cfg.debug.prompt_dump,
+        root=Path(cfg.paths.project_root) if cfg.paths.project_root else None,
+    )
 
 
 register_provider("openai_compat", _openai_compat)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import threading
+from pathlib import Path
 from typing import Iterator, Optional
 
 import openai
@@ -11,14 +12,24 @@ from openai import DefaultHttpxClient, OpenAI
 
 from ..config import SamplingConfig, ServerConfig, ThinkingConfig
 from .base import LLMCancelled, LLMChunk, LLMError, LLMProvider, ToolCall, Usage
+from .prompt_dump import dump_request
 from .think_parser import ThinkParser
 
 
 class OpenAICompatProvider(LLMProvider):
-    def __init__(self, server: ServerConfig, thinking: ThinkingConfig, sampling: SamplingConfig) -> None:
+    def __init__(
+        self,
+        server: ServerConfig,
+        thinking: ThinkingConfig,
+        sampling: SamplingConfig,
+        dump: bool = False,
+        root: Optional[Path] = None,
+    ) -> None:
         self.server = server
         self.thinking = thinking
         self.sampling = sampling
+        self.dump = dump
+        self.dump_root = root
         http_client = DefaultHttpxClient(
             timeout=openai.Timeout(server.timeout, connect=server.connect_timeout),
             trust_env=not server.bypass_proxy,
@@ -79,6 +90,8 @@ class OpenAICompatProvider(LLMProvider):
         max_tokens: Optional[int] = None,
     ) -> Iterator[LLMChunk]:
         kw = self.build_request(messages, tools, thinking, max_tokens)
+        if self.dump:
+            dump_request(self.dump_root, kw)
         try:
             stream = self.client.chat.completions.create(**kw)
         except openai.OpenAIError as e:

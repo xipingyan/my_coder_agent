@@ -171,6 +171,9 @@ class Server:
             "context_estimate": self.context_estimate,
             "task_types": self.task_types,
             "system_prompt": self.system_prompt,
+            "prompt_dumps": self.prompt_dumps,
+            "prompt_dump_content": self.prompt_dump_content,
+            "clear_prompt_dumps": self.clear_prompt_dumps,
             "session_turns": self.session_turns,
             "session_summaries": self.session_summaries,
             "session_detail": self.session_detail,
@@ -599,6 +602,37 @@ class Server:
         e = self._require_engine()
         tt = e.task_types.get(p.get("task_type") or "general")
         return {"text": PromptBuilder(e.root, e.task_types, PromptSections()).build(tt)}
+
+    # ------------------------------------------------------ prompt dumps (debug)
+    def _dump_dir(self) -> Path:
+        from .llm.prompt_dump import dump_dir
+        return dump_dir(self.root)
+
+    def prompt_dumps(self, p: dict) -> dict:
+        d = self._dump_dir()
+        out = []
+        if d.is_dir():
+            for f in sorted(d.glob("*.json"), reverse=True):
+                st = f.stat()
+                out.append({"name": f.name, "size": st.st_size, "mtime": st.st_mtime})
+        return {"dir": str(d), "enabled": bool(self.engine and self.engine.config.debug.prompt_dump), "files": out}
+
+    def prompt_dump_content(self, p: dict) -> dict:
+        import os
+        name = os.path.basename(p.get("name", ""))  # no path traversal
+        f = self._dump_dir() / name
+        if not f.is_file():
+            raise FileNotFoundError(name)
+        return {"name": name, "text": f.read_text(encoding="utf-8")}
+
+    def clear_prompt_dumps(self, p: dict) -> dict:
+        d = self._dump_dir()
+        n = 0
+        if d.is_dir():
+            for f in d.glob("*.json"):
+                f.unlink(missing_ok=True)
+                n += 1
+        return {"ok": True, "deleted": n}
 
     def answer(self, p: dict) -> dict:
         req_id = p.get("req_id", "")

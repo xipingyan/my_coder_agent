@@ -588,6 +588,19 @@ fieldset.grp legend { font-weight: bold; padding: 0 6px; }
 .modal .dirent.dir { cursor: pointer; }
 .modal .dirent:hover { background: var(--hover); }
 .modal .dirent .ico { margin-right: 6px; }
+.modal.dumps { width: 1100px; height: 75vh; }
+.modal.dumps .dbody { display: flex; gap: 12px; height: 58vh; }
+.modal.dumps .dlist {
+  width: 320px; min-width: 220px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.modal.dumps .drow { padding: 5px 8px; border-bottom: 1px solid var(--row-border); font-size: 12px; cursor: pointer; }
+.modal.dumps .drow:hover { background: var(--hover); }
+.modal.dumps .drow.sel { background: var(--selected); }
+.modal.dumps .drow .dname { font-family: monospace; word-break: break-all; }
+.modal.dumps .drow .dmeta { color: var(--text-soft2); font-size: 11px; }
+.modal.dumps .dview { flex: 1; overflow: auto; }
+.modal.dumps .dview pre { margin: 0; padding: 8px; background: var(--code-bg); border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 
 /* backend-down banner */
 #backend-banner {
