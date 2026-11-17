@@ -38,29 +38,33 @@ function check(label, ok) {
   const o = JSON.parse(dlg);
   check("projects dialog visible", o.show);
   check("dialog title", o.head === "Projects");
-  check("dialog buttons", o.btns.join(",") === "+ Local project...,+ Remote project...,Rename,Delete");
+  check("dialog buttons", o.btns.join(",") === "+ Add project...,Rename,Delete");
 
   // 2) the auto-opened root is remembered as a saved project (via openProject)
   const rows = await evalJs("[...document.querySelectorAll('#modal .projrow .pname')].map(e => e.textContent)");
   check("auto-opened project is in the list", rows.some((n) => n.includes("agent_ts_gui")));
 
-  // 3) remote dir browser: list the backend machine's home dir
+  // 3) local mode: "+ Add project..." uses the native folder picker (mocked via
+  // the __pickDirectory hook); the remote dir browser is covered by cdp_remote_test
   await evalJs("document.querySelector('#modal .yes').click()"); // close projects dialog
   await wait(200);
-  const browse = await evalJs(`(async () => {
-    // reuse the internal dialog via the button path: open projects, click + Remote project...
+  const add = await evalJs(`(async () => {
+    window.__pickDirectory = () => Promise.resolve("/tmp");
     document.getElementById('root-label').click();
     await new Promise(r => setTimeout(r, 200));
-    document.querySelector('#modal .add-remote').click();
-    await new Promise(r => setTimeout(r, 1500));
-    const head = document.querySelector('#modal .head') && document.querySelector('#modal .head').textContent;
-    const entries = [...document.querySelectorAll('#modal .dirent')].slice(0, 3).map(e => e.textContent.trim());
-    document.querySelector('#modal .no').click(); // cancel
-    return JSON.stringify({ head, entries });
+    document.querySelector('#modal .add-project').click();
+    await new Promise(r => setTimeout(r, 500));
+    // the name input modal must be up (native picker was mocked, no browser rows)
+    const promptUp = !!document.querySelector('.modal-backdrop.stacked .pinput');
+    const hasBrowser = !!document.querySelector('#modal .pathbar');
+    document.querySelector('.modal-backdrop.stacked .pno')?.click()
+      ?? document.querySelector('.modal-backdrop.stacked .no')?.click();
+    await new Promise(r => setTimeout(r, 200));
+    document.querySelector('#modal .yes').click();
+    return JSON.stringify({ promptUp, hasBrowser });
   })()`);
-  const b = JSON.parse(browse);
-  check("remote browser title", b.head.includes("backend machine"));
-  check("remote browser lists entries", b.entries.length > 0);
+  const a = JSON.parse(add);
+  check("local mode: add uses native picker (name prompt, no dir browser)", a.promptUp && !a.hasBrowser);
 
   cdp.close();
   await killApp(app);

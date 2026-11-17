@@ -26,7 +26,7 @@ const app = spawnApp({ root: "/tmp/proj_a", onLog: (d) => process.stdout.write(`
   await evalJs("document.getElementById('root-label').click()");
   await wait(300);
 
-  const click = await evalJs(`document.querySelector('#modal .add-local').click(); "clicked"`, 8000);
+  const click = await evalJs(`document.querySelector('#modal .add-project').click(); "clicked"`, 8000);
   console.log("click result:", click);
   await wait(1500);
   const probe = await evalJs("1+1", 3000);

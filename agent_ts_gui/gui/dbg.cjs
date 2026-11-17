@@ -20,7 +20,7 @@ function getWsUrl() { return new Promise((resolve) => { http.get("http://127.0.0
   await evalJs(`window.api.pickDirectory = () => Promise.resolve("/tmp/proj_b")`);
   await evalJs("document.getElementById('projects-btn').click()");
   await wait(300);
-  await evalJs("document.querySelector('#modal .add-local').click()");
+  await evalJs("document.querySelector('#modal .add-project').click()");
   await wait(500);
   console.log("backdrops:", await evalJs("document.querySelectorAll('.modal-backdrop').length"));
   console.log("stacked:", await evalJs("document.querySelector('.modal-backdrop.stacked') && document.querySelector('.modal-backdrop.stacked').outerHTML.slice(0,300)"));

@@ -37,7 +37,7 @@ function check(label, ok) {
   await evalJs(`window.__pickDirectory = () => Promise.resolve(${JSON.stringify(ROOT_B)})`);
   await evalJs("document.getElementById('root-label').click()");
   await wait(300);
-  await evalJs("document.querySelector('#modal .add-local').click()");
+  await evalJs("document.querySelector('#modal .add-project').click()");
   await wait(300);
 
   // the name input modal must be up (previously window.prompt returned null and

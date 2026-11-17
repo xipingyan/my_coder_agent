@@ -72,7 +72,7 @@ function check(label, ok) {
       // quick direct RPC via the app's internal call() is not exposed; use the projects dialog browser instead
       document.getElementById('root-label').click();
       await new Promise(r => setTimeout(r, 200));
-      document.querySelector('#modal .add-remote').click();
+      document.querySelector('#modal .add-project').click();
       await new Promise(r => setTimeout(r, 1500));
       const n = document.querySelectorAll('#modal .dirent').length;
       document.querySelector('#modal .no').click();

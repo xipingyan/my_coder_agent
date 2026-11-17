@@ -247,10 +247,11 @@ async function openProject(root: string, sessionId: string | null = null) {
   let saved = savedProjectFor(r.root);
   if (!saved) {
     // a project opened outside the dialog (e.g. --root at boot): remember it
-    // under its folder name so it can be re-opened by name next time. The path
-    // is on the backend machine, hence mode "remote" (same machine in the
-    // local-server build).
-    saved = { name: r.root.split(/[\\/]/).filter(Boolean).pop() ?? r.root, mode: "remote", path: r.root };
+    // under its folder name so it can be re-opened by name next time. The
+    // mode follows the connection: the path is on the machine the backend
+    // runs on (this machine in local mode, the server in remote mode).
+    const connMode = (await window.api.getConnMode().catch(() => "local")) as "local" | "remote";
+    saved = { name: r.root.split(/[\\/]/).filter(Boolean).pop() ?? r.root, mode: connMode, path: r.root };
     rememberProject(saved.name, saved.mode, saved.path);
   }
   setLastProjectName(saved.name);
@@ -1808,23 +1809,23 @@ function browseRemoteDir(initial: string): Promise<string | null> {
 }
 
 async function projectsDialog(): Promise<void> {
-  const list = loadProjects();
-  const last = lastProjectName();
   // in remote mode the project paths live on the server machine, so a native
-  // folder dialog on this machine would pick paths the server cannot see
+  // folder dialog on this machine would pick paths the server cannot see; the
+  // dialog therefore only shows projects matching the current connection mode
   const remoteMode = (await window.api.getConnMode().catch(() => "local")) === "remote";
+  const list = loadProjects().filter((p) => p.mode === (remoteMode ? "remote" : "local"));
+  const last = lastProjectName();
   const modal = $("modal");
   modal.className = "modal wide";
   modal.innerHTML =
     `<div class="head">Projects</div>` +
     `<div class="body"><div class="projlist"></div>` +
     `<div class="msg"></div>` +
-    `<div class="btnrow">${remoteMode ? "" : `<button class="add-local">+ Local project...</button>`}` +
-    `<button class="add-remote">+ ${remoteMode ? "Server project..." : "Remote project..."}</button>` +
+    `<div class="btnrow"><button class="add-project">+ Add project...</button>` +
     `<button class="rename">Rename</button><button class="del">Delete</button></div>` +
     `<div class="tip" style="font-size:11px;color:var(--text-soft2)">${remoteMode
       ? "Projects live on the machine the agent server runs on (browsed over the connection). "
-      : "Local = on this machine (native folder dialog). Remote = on the machine the backend runs on (browsed over the connection). "}Projects are remembered by name.</div></div>` +
+      : "Projects live on this machine (native folder dialog). "}Projects are remembered by name.</div></div>` +
     `<div class="foot"><button class="open">Open</button><span class="flex1"></span><button class="primary yes">Close</button></div>`;
   const listEl = modal.querySelector(".projlist")!;
   const msg = modal.querySelector(".msg")!;
@@ -1861,26 +1862,23 @@ async function projectsDialog(): Promise<void> {
     void openProjectNamed(selected.name, selected.mode, selected.path);
   });
 
-  const addLocalBtn = modal.querySelector(".add-local");
-  if (addLocalBtn) addLocalBtn.addEventListener("click", async () => {
-    // __pickDirectory is a CDP-test hook (see window.__onEvent); defaults to the
-    // native picker, which a headless test cannot drive.
-    const pick: () => Promise<string | null> = (window as any).__pickDirectory ?? window.api.pickDirectory;
-    const dir = await pick();
+  // add a project for the current connection mode: native folder picker in
+  // local mode, remote directory browser in remote mode. The saved project's
+  // mode is the connection mode, so it only shows in the matching dialog.
+  modal.querySelector(".add-project")!.addEventListener("click", async () => {
+    let dir: string | null = null;
+    if (remoteMode) {
+      dir = await browseRemoteDir("");
+    } else {
+      // __pickDirectory is a CDP-test hook (see window.__onEvent); defaults to
+      // the native picker, which a headless test cannot drive.
+      const pick: () => Promise<string | null> = (window as any).__pickDirectory ?? window.api.pickDirectory;
+      dir = await pick();
+    }
     if (!dir) return;
     const name = await promptModal("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
     if (!name) return;
-    list.push({ name, mode: "local", path: dir });
-    saveProjects(list);
-    selected = list[list.length - 1];
-    render();
-  });
-  modal.querySelector(".add-remote")!.addEventListener("click", async () => {
-    const dir = await browseRemoteDir("");
-    if (!dir) return;
-    const name = await promptModal("Project name:", dir.split(/[\\/]/).filter(Boolean).pop() ?? dir);
-    if (!name) return;
-    list.push({ name, mode: "remote", path: dir });
+    list.push({ name, mode: remoteMode ? "remote" : "local", path: dir });
     saveProjects(list);
     selected = list[list.length - 1];
     render();
