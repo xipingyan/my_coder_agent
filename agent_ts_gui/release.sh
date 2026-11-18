@@ -51,7 +51,10 @@ cp gui/build-resources/backend/coder-agent-server "$OUTDIR/coder-agent-server-${
 rm -f "$OUTDIR/coder-agent"
 cat > "$OUTDIR/coder-agent" <<EOF
 #!/usr/bin/env bash
-exec "\$(cd "\$(dirname "\$0")" && pwd)/coder-agent-${VER}.AppImage" --no-sandbox "\$@"
+# GUI 默认后台启动: terminal 立即返回, 关闭 terminal 也不会杀掉程序
+DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+nohup "\$DIR/coder-agent-${VER}.AppImage" --no-sandbox "\$@" >>"\$DIR/coder-agent.log" 2>&1 &
+echo "coder-agent started in background (pid \$!, log \$DIR/coder-agent.log)"
 EOF
 chmod +x "$OUTDIR/coder-agent"
 # server launcher (no version in name): starts the server in the background,
