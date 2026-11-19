@@ -74,6 +74,10 @@ is_running() {
     [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
 }
 
+port_in_use() {
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$1$"
+}
+
 case "${1:-start}" in
 stop)
     if is_running; then
@@ -83,6 +87,14 @@ stop)
         rm -f "$PIDFILE"
         echo "coder-agent-server not running"
     fi
+    # Also kill any stray server process (e.g. started before the pidfile existed,
+    # or one whose pidfile was lost) - it would keep holding the port.
+    STRAY="$(pgrep -f "coder-agent-server-[0-9.]*\.linux" 2>/dev/null || true)"
+    if [ -n "$STRAY" ]; then
+        kill $STRAY 2>/dev/null || true
+        sleep 1
+        echo "stray coder-agent-server process(es) killed: $STRAY"
+    fi
     ;;
 start)
     if is_running; then
@@ -90,6 +102,11 @@ start)
         exit 1
     fi
     PORT="${2:-8931}"
+    if port_in_use "$PORT"; then
+        echo "port $PORT is already in use - another server (or program) is holding it." >&2
+        echo "run '$0 stop' first, or start on another port: '$0 start $((PORT+1))'" >&2
+        exit 1
+    fi
     TOKEN="${3:-}"
     TOKENFILE="$(pwd)/coder-agent-server.token"
     if [ -z "$TOKEN" ] && [ -f "$TOKENFILE" ]; then
