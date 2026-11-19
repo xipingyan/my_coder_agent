@@ -53,7 +53,7 @@ class ContextConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    max_steps: int = 40
+    max_steps: int = 120
     parallelism: int = 1  # concurrent sub-agents (1 for single-GPU Ollama)
     loop_limit: int = 3  # identical tool calls tolerated before intervening
     auto_skills: bool = True  # inject skills whose `triggers` match a failing command's output
