@@ -23,7 +23,11 @@ npm run build
 if [ "$(uname)" = "Linux" ]; then
   DESKTOP_DIR="$HOME/.local/share/applications"
   mkdir -p "$DESKTOP_DIR"
-  cat > "$DESKTOP_DIR/coder-agent.desktop" <<EOF
+  # Never clobber a real launcher entry (e.g. "Exec=<...>.AppImage" created when
+  # the user pinned the AppImage to the dock) - that would turn the dock icon
+  # into a no-op (/bin/true).
+  if [ ! -f "$DESKTOP_DIR/coder-agent.desktop" ] || grep -q "^Exec=/bin/true" "$DESKTOP_DIR/coder-agent.desktop"; then
+    cat > "$DESKTOP_DIR/coder-agent.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Coder Agent
@@ -32,7 +36,8 @@ Exec=/bin/true
 Icon=$PWD/build-resources/icon-512.png
 StartupWMClass=CoderAgent
 EOF
-  update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+  fi
 fi
 
 exec node_modules/.bin/electron --no-sandbox --disable-gpu --class=CoderAgent . "$@"
