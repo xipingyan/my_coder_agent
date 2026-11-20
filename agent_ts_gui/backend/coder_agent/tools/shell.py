@@ -6,6 +6,7 @@ import os
 import queue
 import signal
 import subprocess
+import sys
 import threading
 import time
 
@@ -18,6 +19,22 @@ KEEP_CHARS = 10000
 
 
 def _kill(proc: subprocess.Popen) -> None:
+    # On Unix the child was started in its own session (start_new_session), so
+    # the whole process group (the shell + its children) is signalled. On
+    # Windows there is no process group: kill the process tree via taskkill.
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        return
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         try:
@@ -38,20 +55,32 @@ def run_command(ctx: ToolContext, a: dict) -> str:
         raise ToolError(f"cwd is not a directory: {a.get('cwd')}")
 
     env = dict(os.environ, TERM="dumb", NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
-    proc = subprocess.Popen(
-        cmd,
-        shell=True,
-        executable="/bin/bash" if os.path.exists("/bin/bash") else None,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.DEVNULL,  # never wait for interactive input
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace",
-        bufsize=1,
-        start_new_session=True,
-    )
+    if sys.platform == "win32":
+        # CREATE_NEW_PROCESS_GROUP: the child gets its own process group so it
+        # can be killed as a tree (taskkill /T) and does not receive the
+        # console's Ctrl-C; start_new_session is not available on Windows.
+        proc = subprocess.Popen(
+            cmd, shell=True, cwd=cwd, env=env,
+            stdin=subprocess.DEVNULL,  # never wait for interactive input
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, errors="replace", bufsize=1,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    else:
+        proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            executable="/bin/bash" if os.path.exists("/bin/bash") else None,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,  # never wait for interactive input
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+            start_new_session=True,
+        )
     q: "queue.Queue[str | None]" = queue.Queue()
 
     def reader() -> None:

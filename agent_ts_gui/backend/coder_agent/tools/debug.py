@@ -11,9 +11,28 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
 from .base import Tool, ToolContext, ToolError
+
+
+def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+    """Send ``sig`` to the child's process group (Unix) or kill the whole
+    process tree (Windows: taskkill /T)."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+        return
+    try:
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 NOISE = re.compile(
     r"Error disabling address space randomization|Thread debugging using libthread_db|Using host libthread_db|"
@@ -93,9 +112,14 @@ def debug_backtrace(ctx: ToolContext, a: dict) -> str:
     timeout = max(5, min(int(a.get("timeout", 60)), 600))
     cmd = _gdb_command(prog, args, a.get("breakpoint", "").strip())
 
-    proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace", start_new_session=True,
-                            env=dict(os.environ, TERM="dumb", LC_ALL="C"))
+    kwargs = dict(cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT, text=True, errors="replace",
+                  env=dict(os.environ, TERM="dumb", LC_ALL="C"))
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, **kwargs)
     start = time.monotonic()
     interrupted: float | None = None
     status = ""
@@ -107,15 +131,15 @@ def debug_backtrace(ctx: ToolContext, a: dict) -> str:
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - start
             if ctx.cancel.is_set():
-                os.killpg(proc.pid, signal.SIGKILL)
+                _signal_group(proc, signal.SIGKILL)
                 out, _ = proc.communicate()
                 status = "cancelled by user"
                 break
             if interrupted is None and elapsed > timeout:
                 interrupted = elapsed
-                os.killpg(proc.pid, signal.SIGINT)  # gdb stops the inferior and runs the queued bt commands
+                _signal_group(proc, signal.SIGINT)  # gdb stops the inferior and runs the queued bt commands
             elif interrupted is not None and elapsed > interrupted + 20:
-                os.killpg(proc.pid, signal.SIGKILL)
+                _signal_group(proc, signal.SIGKILL)
                 out, _ = proc.communicate()
                 status = "gdb did not stop after the interrupt and was killed"
                 break
