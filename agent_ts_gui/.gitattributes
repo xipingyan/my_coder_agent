@@ -1,0 +1,5 @@
+# cmd.exe mis-parses LF-only batch files (lines get swallowed, so e.g.
+# "cd gui" in start_gui.bat is lost and electron starts in the repo root:
+# "Unable to find Electron app at ..."). Force CRLF for all .bat files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
