@@ -43,13 +43,68 @@ cd .. && ./start_gui.sh                       # last-used project / ask
 ./start_gui.sh --root /path/to/proj           # explicit project
 ```
 
-国内需要mirror才能下载。在你的项目根目录（即 package.json 所在的 gui 文件夹）创建或编辑 .npmrc 文件。
+### China / restricted network
 
-写入以下内容：
+`npm install` often dies in `electron`'s `postinstall`, not on the npm packages
+themselves. The script downloads `electron.exe` from GitHub
+(`github.com/electron/electron/releases`). On this machine that connection
+timed out (`ETIMEDOUT`). `https://npmmirror.com/mirrors/electron/` also timed
+out. The URL that returned HTTP 200 was:
+
+```text
+https://cdn.npmmirror.com/binaries/electron/v<version>/electron-v<version>-win32-x64.zip
 ```
+
+Two different mirrors are involved. Do not put `electron_mirror` in `.npmrc`.
+npm 11 warns `Unknown project config "electron_mirror"` and that value
+overrides the working mirror, so the install still hits the dead host.
+
+1. Package registry — local only. `gui/.npmrc` is gitignored, so create it
+   yourself:
+
+```text
 registry=https://registry.npmmirror.com
-electron_mirror=https://npmmirror.com/mirrors/electron/
 ```
+
+2. Electron binary — already in `gui/package.json`. `@electron/get` reads
+   `npm_package_config_electron_*` from this block:
+
+```json
+"config": {
+  "electron_mirror": "https://cdn.npmmirror.com/binaries/electron/",
+  "electron_custom_dir": "{{ version }}"
+}
+```
+
+Then, from `gui/`:
+
+```bat
+npm install
+node -e "console.log(require('electron'))"
+```
+
+The second command should print
+`...\gui\node_modules\electron\dist\electron.exe`.
+
+If `postinstall` still resets mid-download (`ECONNRESET`), skip the script,
+download the zip, and drop it where Electron expects it. Replace `31.7.7`
+with `node -p "require('./node_modules/electron/package.json').version"`.
+
+```bat
+cd gui
+set ELECTRON_SKIP_BINARY_DOWNLOAD=1
+npm install
+curl -L --retry 5 -o %TEMP%\electron.zip https://cdn.npmmirror.com/binaries/electron/v31.7.7/electron-v31.7.7-win32-x64.zip
+mkdir node_modules\electron\dist
+tar -xf %TEMP%\electron.zip -C node_modules\electron\dist
+if exist node_modules\electron\dist\electron.d.ts move /Y node_modules\electron\dist\electron.d.ts node_modules\electron\electron.d.ts
+<nul set /p=electron.exe> node_modules\electron\path.txt
+node -e "console.log(require('electron'))"
+```
+
+`path.txt` must be exactly `electron.exe` with no trailing newline. Linux uses
+`electron-v<version>-linux-x64.zip` and writes `electron`. macOS writes
+`Electron.app/Contents/MacOS/Electron`.
 
 ### Windows
 
@@ -186,3 +241,68 @@ a Restart button.
   integration tests), `cd gui && npx tsc --noEmit && npm run build`.
 - The renderer exposes `window.__onEvent` for CDP-based UI tests; the app can
   be launched with `--remote-debugging-port=<port>` for that.
+
+### China / restricted network
+
+`npm install` often dies in `electron`'s `postinstall`, not on the npm packages
+themselves. The script downloads `electron.exe` from GitHub
+(`github.com/electron/electron/releases`). On this machine that connection
+timed out (`ETIMEDOUT`). `https://npmmirror.com/mirrors/electron/` also timed
+out. The URL that returned HTTP 200 was:
+
+```text
+https://cdn.npmmirror.com/binaries/electron/v<version>/electron-v<version>-win32-x64.zip
+```
+
+Two different mirrors are involved. Do not put `electron_mirror` in `.npmrc`.
+npm 11 warns `Unknown project config "electron_mirror"` and that value
+overrides the working mirror, so the install still hits the dead host.
+
+1. Package registry — local only. `gui/.npmrc` is gitignored, so create it
+   yourself:
+
+```text
+registry=https://registry.npmmirror.com
+```
+
+2. Electron binary — already in `gui/package.json`. `@electron/get` reads
+   `npm_package_config_electron_*` from this block:
+
+```json
+"config": {
+  "electron_mirror": "https://cdn.npmmirror.com/binaries/electron/",
+  "electron_custom_dir": "{{ version }}"
+}
+```
+
+Then, from `gui/`:
+
+```bat
+npm install
+node -e "console.log(require('electron'))"
+```
+
+The second command should print
+`...\gui\node_modules\electron\dist\electron.exe`.
+
+If `postinstall` still resets mid-download (`ECONNRESET`), skip the script,
+download the zip, and drop it where Electron expects it. Replace `31.7.7`
+with `node -p "require('./node_modules/electron/package.json').version"`.
+
+```bat
+cd gui
+set ELECTRON_SKIP_BINARY_DOWNLOAD=1
+npm install
+curl -L --retry 5 -o %TEMP%\electron.zip https://cdn.npmmirror.com/binaries/electron/v31.7.7/electron-v31.7.7-win32-x64.zip
+mkdir node_modules\electron\dist
+tar -xf %TEMP%\electron.zip -C node_modules\electron\dist
+if exist node_modules\electron\dist\electron.d.ts move /Y node_modules\electron\dist\electron.d.ts node_modules\electron\electron.d.ts
+<nul set /p=electron.exe> node_modules\electron\path.txt
+node -e "console.log(require('electron'))"
+```
+
+`path.txt` must be exactly `electron.exe` with no trailing newline. Linux uses
+`electron-v<version>-linux-x64.zip` and writes `electron`. macOS writes
+`Electron.app/Contents/MacOS/Electron`.
+
+# run
