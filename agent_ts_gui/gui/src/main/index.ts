@@ -5,6 +5,7 @@ import { spawn, ChildProcess } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import WebSocket from "ws";
+import { backendUrlFromLine } from "./backend-output";
 
 // Backend location: in dev the repo's backend/ dir + its venv python; in a
 // packaged app a standalone PyInstaller bundle shipped in resources/backend.
@@ -83,12 +84,12 @@ function startBackend(root: string | null): Promise<string> {
       if (!settled) { settled = true; reject(new Error("backend did not start within 30s")); }
     }, 30000);
     const onLine = (line: string) => {
-      const m = line.match(/^WS_URL=(\S+)$/);
-      if (m) {
+      const url = backendUrlFromLine(line);
+      if (url) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(m[1]);
+        resolve(url);
       } else process.stdout.write(`[backend] ${line}\n`);
     };
     let buf = "";
@@ -266,6 +267,7 @@ async function createWindowAsync(root: string | null) {
   try {
     url = await startBackend(startRoot);
   } catch (e) {
+    console.error("[main] backend startup failed:", e);
     window.webContents.send("backend-exit", null);
     return;
   }

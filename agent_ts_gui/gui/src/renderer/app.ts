@@ -102,20 +102,20 @@ window.api.onReply((msg: ReplyMsg) => {
 });
 
 function call(method: string, params: Record<string, any> = {}, opts: { waitReady?: boolean } = {}): Promise<any> {
+  const id = ++nextId;
   return new Promise((resolve) => {
     const send = () => {
-      const p = window.api.send({ id: nextId, method, params });
+      const p = window.api.send({ id, method, params });
       if (p && typeof p.catch === "function") {
         p.catch((e: any) => {
-          if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: `backend not connected (${e?.message ?? e})` }); }
+          if (pending.has(id)) { pending.delete(id); resolve({ __error: `backend not connected (${e?.message ?? e})` }); }
         });
       }
       setTimeout(() => {
-        if (pending.has(nextId)) { pending.delete(nextId); resolve({ __error: "request timed out" }); }
+        if (pending.has(id)) { pending.delete(id); resolve({ __error: "request timed out" }); }
       }, 120000);
     };
-    nextId += 1;
-    pending.set(nextId, resolve);
+    pending.set(id, resolve);
     // the dialog may be opened while the backend is still starting (boot):
     // wait for a connection URL before sending, so the first RPCs succeed
     if (opts.waitReady) {

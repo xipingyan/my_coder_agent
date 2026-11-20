@@ -17,6 +17,8 @@ const VENV_PY = path.join(BACKEND, ".venv", IS_WIN ? "Scripts" : "bin", IS_WIN ?
 
 // name -> script. Order matters only for readability.
 const SUITES = {
+  connection_regression: "connection_regression_test.cjs",
+  settings_boot: "cdp_settings_boot_test.cjs",
   boot: "cdp_boot_test.cjs",
   proj: "cdp_proj_test.cjs",
   proj_switch: "cdp_proj_switch_test.cjs",
