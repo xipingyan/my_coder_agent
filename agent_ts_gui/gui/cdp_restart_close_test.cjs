@@ -3,6 +3,9 @@
 // This used to hang: a backend spawned by the in-flight restart kept the
 // app alive, and before-quit blocked on it forever.
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const os = require("os");
+const path = require("path");
+const PROJ_A = path.join(os.tmpdir(), "proj_a");
 
 let failed = false;
 function check(label, ok) {
@@ -34,7 +37,7 @@ async function expectExit(app, label, ms = 15000) {
 
 (async () => {
   // ---- A: close while the restart is in flight ----
-  let app = spawnApp({ root: "/tmp/proj_a", onLog: (d) => process.stdout.write(`[app] ${d}`) });
+  let app = spawnApp({ root: PROJ_A, onLog: (d) => process.stdout.write(`[app] ${d}`) });
   let url = await getWsUrl(app.port);
   if (!url) throw new Error("no devtools url");
   let cdp = connectCdp(url);
@@ -51,7 +54,7 @@ async function expectExit(app, label, ms = 15000) {
   await killApp(app);
 
   // ---- B: close after the restart finished ----
-  app = spawnApp({ root: "/tmp/proj_a", onLog: (d) => process.stdout.write(`[app] ${d}`) });
+  app = spawnApp({ root: PROJ_A, onLog: (d) => process.stdout.write(`[app] ${d}`) });
   url = await getWsUrl(app.port);
   if (!url) throw new Error("no devtools url");
   cdp = connectCdp(url);

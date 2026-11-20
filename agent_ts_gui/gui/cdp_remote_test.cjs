@@ -2,12 +2,12 @@
 // already listening on 127.0.0.1:8931 (started separately, like on a real
 // remote machine). The GUI is pointed at it via connection.json (mode
 // "remote") and must NOT spawn its own backend.
-const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const { spawnApp, killApp, getWsUrl, connectCdp, wait, venvPython } = require("./cdp_test_lib.cjs");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const ROOT = process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui";
+const ROOT = process.env.TEST_ROOT || path.resolve(__dirname, "..");
 const PORT = 8931;
 
 // point the app at the remote server, in an isolated user-data-dir (so the
@@ -108,18 +108,25 @@ function check(label, ok) {
     // and keep trying; restart the server and the GUI must reconnect on its own
     const { spawn, execSync } = require("child_process");
     const BACKEND = path.join(__dirname, "..", "backend");
-    const venv = path.join(BACKEND, ".venv", "bin", "python");
     const srvLog = path.join(os.tmpdir(), "cdp-remote-restart.log");
     const startSrv = () => {
       const out = fs.openSync(srvLog, "a");
-      const p = spawn(venv, ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(PORT)],
+      const p = spawn(venvPython(), ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(PORT)],
         { cwd: BACKEND, detached: true, stdio: ["ignore", out, out] });
       p.unref();
     };
     const stopSrv = () => {
       try {
-        execSync(`for p in $(ps -eo pid,cmd | awk '/coder_agent.server --host 127.0.0.1 --port ${PORT}/ && !/awk/ {print $1}'); do kill $p 2>/dev/null; done`,
-          { shell: "/bin/bash", stdio: "ignore" });
+        if (process.platform === "win32") {
+          const out = execSync(`netstat -ano -p tcp | findstr "LISTENING" | findstr /R ":${PORT} "`, { stdio: "pipe" }).toString();
+          for (const line of out.split(/\r?\n/)) {
+            const pid = line.trim().split(/\s+/).pop();
+            if (pid) execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+          }
+        } else {
+          execSync(`for p in $(ps -eo pid,cmd | awk '/coder_agent.server --host 127.0.0.1 --port ${PORT}/ && !/awk/ {print $1}'); do kill $p 2>/dev/null; done`,
+            { shell: "/bin/bash", stdio: "ignore" });
+        }
       } catch { /* ignore */ }
     };
     // the runner owns the server on :8931 when it started it; if not, we own it

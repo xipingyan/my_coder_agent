@@ -2,9 +2,11 @@
 // picked directory to the project list (the name input modal works in Electron,
 // where window.prompt() silently returns null).
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const os = require("os");
+const path = require("path");
 
-const ROOT_A = process.env.TEST_ROOT_A || "/tmp/proj_a";
-const ROOT_B = process.env.TEST_ROOT_B || "/tmp/proj_b";
+const ROOT_A = process.env.TEST_ROOT_A || path.join(os.tmpdir(), "proj_a");
+const ROOT_B = process.env.TEST_ROOT_B || path.join(os.tmpdir(), "proj_b");
 const fs = require("fs");
 fs.mkdirSync(ROOT_A, { recursive: true });
 fs.mkdirSync(ROOT_B, { recursive: true });

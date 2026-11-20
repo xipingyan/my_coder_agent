@@ -1,7 +1,8 @@
 // Verify the api_key field in Settings > Model has a datalist quick-pick (same style as base_url).
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const path = require("path");
 
-const app = spawnApp({ root: process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui" });
+const app = spawnApp({ root: process.env.TEST_ROOT || path.resolve(__dirname, "..") });
 
 (async () => {
   const url = await getWsUrl(app.port);

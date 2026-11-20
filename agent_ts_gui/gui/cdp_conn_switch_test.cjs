@@ -6,21 +6,20 @@
 //    connect it (ws open), reopen the project, no "backend not connected",
 // 4) the remote label hides in local mode,
 // 5) switching back to remote reconnects to the standalone server.
-const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const { spawnApp, killApp, getWsUrl, connectCdp, wait, venvPython } = require("./cdp_test_lib.cjs");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const ROOT = process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui";
+const ROOT = process.env.TEST_ROOT || path.resolve(__dirname, "..");
 const PORT = 8932; // isolated port so we own the server
 const B = path.join(__dirname, "..", "backend");
-const venv = path.join(B, ".venv", "bin", "python");
 const srvLog = path.join(os.tmpdir(), "cdp-conn-switch-srv.log");
 let srv = null;
 function startSrv() {
   const out = fs.openSync(srvLog, "a");
-  srv = spawn(venv, ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(PORT)],
+  srv = spawn(venvPython(), ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(PORT)],
     { cwd: B, detached: true, stdio: ["ignore", out, out] });
   srv.unref();
 }
@@ -87,6 +86,9 @@ function check(label, ok) {
       return false;
     }
     check("backend connected (ping ok)", await ensureConnected());
+    // the boot's auto-open can race the first remote connect (the project gets
+    // queued and then lost); make sure the link is solid before opening by hand
+    await ensureConnected();
 
     // seed a saved project in localStorage and open it through the app's own
     // openProject (via the projects dialog) so S.root is set and the local

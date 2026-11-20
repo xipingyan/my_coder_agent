@@ -10,7 +10,7 @@ const path = require("path");
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cdp-home-"));
 process.env.CODER_AGENT_HOME = home;
 
-const app = spawnApp({ root: process.env.TEST_ROOT || "/tmp/proj_a", onLog: (d) => process.stderr.write(`[app] ${d}`) });
+const app = spawnApp({ root: process.env.TEST_ROOT || path.join(os.tmpdir(), "proj_a"), onLog: (d) => process.stderr.write(`[app] ${d}`) });
 
 let failed = false;
 function check(name, cond) {

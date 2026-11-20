@@ -12,6 +12,8 @@ const path = require("node:path");
 const GUI = __dirname;
 const BACKEND = path.join(__dirname, "..", "backend");
 const REMOTE_PORT = 8931;
+const IS_WIN = process.platform === "win32";
+const VENV_PY = path.join(BACKEND, ".venv", IS_WIN ? "Scripts" : "bin", IS_WIN ? "python.exe" : "python");
 
 // name -> script. Order matters only for readability.
 const SUITES = {
@@ -42,33 +44,46 @@ function pick() {
 }
 
 function portListening(port) {
-  // ss pads the local-address column, so match the port at the end of the
-  // trimmed line (":8931$" on the raw line fails on the trailing spaces)
-  try { return execSync(`ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${port}$" && echo up || echo down`, { shell: "/bin/bash" }).toString().trim() === "up"; }
+  try {
+    if (IS_WIN) {
+      return execSync(`netstat -ano -p tcp | findstr "LISTENING" | findstr /R ":${port} "`, { stdio: "pipe" }).toString().trim() !== "";
+    }
+    // ss pads the local-address column, so match the port at the end of the
+    // trimmed line (":8931$" on the raw line fails on the trailing spaces)
+    return execSync(`ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":${port}$" && echo up || echo down`, { shell: "/bin/bash" }).toString().trim() === "up";
+  }
   catch { return false; }
 }
 
 // start the remote server detached so it survives this runner's shell
 function startRemoteServer() {
-  const venv = path.join(BACKEND, ".venv", "bin", "python");
   const log = path.join(os.tmpdir(), "remote_srv.log");
   const out = fs.openSync(log, "a");
-  const child = spawn(venv, ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(REMOTE_PORT)],
+  const child = spawn(VENV_PY, ["-m", "coder_agent.server", "--host", "127.0.0.1", "--port", String(REMOTE_PORT)],
     { cwd: BACKEND, detached: true, stdio: ["ignore", out, out] });
   child.unref();
   for (let i = 0; i < 30; i++) {
     if (portListening(REMOTE_PORT)) return;
-    execSync("sleep 0.5");
+    execSync(IS_WIN ? "ping -n 2 127.0.0.1 >nul" : "sleep 0.5");
   }
   throw new Error(`remote server did not start on :${REMOTE_PORT} (see ${log}). ` +
     `If a server from a previous crashed run holds the port, kill it first: ` +
-    `ps -eo pid,cmd | grep "coder_agent.server --port ${REMOTE_PORT}"`);
+    (IS_WIN ? `netstat -ano | findstr :${REMOTE_PORT}  (then taskkill /PID <pid> /F)`
+            : `ps -eo pid,cmd | grep "coder_agent.server --port ${REMOTE_PORT}"`));
 }
 
 function stopRemoteServer() {
   try {
-    execSync(`for p in $(ps -eo pid,cmd | awk '/coder_agent.server --host 127.0.0.1 --port ${REMOTE_PORT}/ && !/awk/ {print $1}'); do kill $p 2>/dev/null; done`,
-      { shell: "/bin/bash", stdio: "ignore" });
+    if (IS_WIN) {
+      const out = execSync(`netstat -ano -p tcp | findstr "LISTENING" | findstr /R ":${REMOTE_PORT} "`, { stdio: "pipe" }).toString();
+      for (const line of out.split(/\r?\n/)) {
+        const pid = line.trim().split(/\s+/).pop();
+        if (pid) execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+      }
+    } else {
+      execSync(`for p in $(ps -eo pid,cmd | awk '/coder_agent.server --host 127.0.0.1 --port ${REMOTE_PORT}/ && !/awk/ {print $1}'); do kill $p 2>/dev/null; done`,
+        { shell: "/bin/bash", stdio: "ignore" });
+    }
   } catch { /* ignore */ }
 }
 

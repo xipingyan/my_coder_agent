@@ -1,9 +1,11 @@
 // Regression test: in the Projects dialog, selecting / double-clicking a
 // different saved project must actually open it (root label changes).
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const os = require("os");
+const path = require("path");
 
-const ROOT_A = process.env.TEST_ROOT_A || "/tmp/proj_a";
-const ROOT_B = process.env.TEST_ROOT_B || "/tmp/proj_b";
+const ROOT_A = process.env.TEST_ROOT_A || path.join(os.tmpdir(), "proj_a");
+const ROOT_B = process.env.TEST_ROOT_B || path.join(os.tmpdir(), "proj_b");
 const fs = require("fs");
 fs.mkdirSync(ROOT_A, { recursive: true });
 fs.mkdirSync(ROOT_B, { recursive: true });
@@ -39,8 +41,8 @@ function check(label, ok) {
   // re-open the dialog)
   await evalJs(`localStorage.setItem("coder-agent.projects",
     JSON.stringify([
-      { name: "proj_a", mode: "remote", path: ${JSON.stringify(ROOT_A)} },
-      { name: "proj_b", mode: "remote", path: ${JSON.stringify(ROOT_B)} }
+      { name: "proj_a", mode: "local", path: ${JSON.stringify(ROOT_A)} },
+      { name: "proj_b", mode: "local", path: ${JSON.stringify(ROOT_B)} }
     ]))`);
   await evalJs("document.getElementById('root-label').click()");
   await wait(300);
@@ -58,7 +60,7 @@ function check(label, ok) {
   let switched = false;
   for (let i = 0; i < 40; i++) {
     const lbl = await evalJs("document.getElementById('titlebar-name').textContent");
-    if (lbl && lbl.includes(ROOT_B)) { switched = true; break; }
+    if (lbl && (lbl.includes(ROOT_B) || lbl.includes("proj_b"))) { switched = true; break; }
     await wait(500);
   }
   check("Open button switches to project B", switched);

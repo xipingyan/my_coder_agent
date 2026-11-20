@@ -2,9 +2,12 @@
 // opens (app blocks) or the click silently does nothing.
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
 const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
-fs.mkdirSync("/tmp/proj_a", { recursive: true });
-const app = spawnApp({ root: "/tmp/proj_a", onLog: (d) => process.stdout.write(`[app] ${d}`) });
+const PROJ_A = path.join(os.tmpdir(), "proj_a");
+fs.mkdirSync(PROJ_A, { recursive: true });
+const app = spawnApp({ root: PROJ_A, onLog: (d) => process.stdout.write(`[app] ${d}`) });
 
 (async () => {
   const url = await getWsUrl(app.port);

@@ -32,9 +32,17 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 // --------------------------------------------------------------- spawn
 // Spawns the app with an isolated user-data-dir. Returns { proc, pid,
 // userDataDir, port }.
+// Synchronous port check (spawnApp is called from top-level sync context):
+// ss on POSIX, netstat on Windows. Any failure = assume free.
 function portFree(port) {
-  try { return !execSync(`ss -ltn 2>/dev/null | grep -q :${port}$`, { shell: "/bin/bash", stdio: "ignore" }); }
-  catch { return true; }
+  try {
+    if (IS_WIN) {
+      const out = execSync(`netstat -ano -p tcp | findstr "LISTENING" | findstr /R ":${port} "`,
+        { stdio: "pipe" }).toString();
+      return out.trim() === "";
+    }
+    return !execSync(`ss -ltn 2>/dev/null | grep -q :${port}$`, { shell: "/bin/bash", stdio: "ignore" });
+  } catch { return true; }
 }
 
 function spawnApp(opts = {}) {
@@ -109,12 +117,19 @@ async function killApp(app, graceMs = 1500) {
   try { fs.rmSync(app.userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 
+function killTree(pid) {
+  try {
+    if (IS_WIN) execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore" });
+    else { try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch { /* ignore */ } } }
+  } catch { /* ignore */ }
+}
+
 // Ctrl-C in the test runner must not leave the spawned app (or its python
 // backend) running: kill every live app on SIGINT/SIGTERM.
 let liveApps = [];
 process.on("SIGINT", () => {
   console.error("\n[cdp_test_lib] interrupted, killing spawned app(s)");
-  for (const a of liveApps) { try { process.kill(-a.pid, "SIGKILL"); } catch { /* ignore */ } try { fs.rmSync(a.userDataDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+  for (const a of liveApps) { killTree(a.pid); try { fs.rmSync(a.userDataDir, { recursive: true, force: true }); } catch { /* ignore */ } }
   process.exit(130);
 });
 process.on("SIGTERM", () => process.exit(143));
@@ -185,4 +200,10 @@ function connectCdp(wsUrl) {
   };
 }
 
-module.exports = { spawnApp, killApp, getWsUrl, connectCdp, wait, IS_WIN };
+// The backend venv python (cross-platform: .venv/Scripts on Windows).
+function venvPython() {
+  const B = path.join(__dirname, "..", "backend");
+  return path.join(B, ".venv", IS_WIN ? "Scripts" : "bin", IS_WIN ? "python.exe" : "python");
+}
+
+module.exports = { spawnApp, killApp, getWsUrl, connectCdp, wait, IS_WIN, venvPython, killTree };

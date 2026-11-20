@@ -1928,8 +1928,8 @@ function addRemoteProject(): Promise<string | null> {
     document.body.appendChild(bd);
     const input = bd.querySelector<HTMLInputElement>(".rpath")!;
     const msg = bd.querySelector(".msg")!;
-    const addBtn = bd.querySelector(".yes")!;
-    const browseBtn = bd.querySelector(".browse")!;
+    const addBtn = bd.querySelector(".yes") as HTMLButtonElement;
+    const browseBtn = bd.querySelector(".browse") as HTMLButtonElement;
     input.focus();
     let busy = false;
     const close = () => { bd.remove(); };

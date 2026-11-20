@@ -1,8 +1,9 @@
 // Smoke test: the Projects dialog opens, lists saved projects, and the
 // remote dir browser works against the local (local-server) backend.
 const { spawnApp, killApp, getWsUrl, connectCdp, wait } = require("./cdp_test_lib.cjs");
+const path = require("path");
 
-const app = spawnApp({ root: process.env.TEST_ROOT || "/home/xiping/mygitee/my_coder_agent/agent_ts_gui", onLog: (d) => process.stdout.write(`[app] ${d}`) });
+const app = spawnApp({ root: process.env.TEST_ROOT || path.resolve(__dirname, ".."), onLog: (d) => process.stdout.write(`[app] ${d}`) });
 
 let failed = false;
 function check(label, ok) {

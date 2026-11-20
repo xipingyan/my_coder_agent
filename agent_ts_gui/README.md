@@ -24,23 +24,23 @@ agent_ts_gui/
   release.bat           # Windows NSIS build (run on Windows)
 ```
 
-## Run
+## Development setup (from scratch)
+
+Prerequisites: **Python 3.11+** and **Node 20+**. The GUI owns the Python
+backend: in development it spawns `backend/.venv`'s python (see
+`gui/src/main/index.ts:backendInfo`), so both environments must exist.
+
+### Linux
 
 ```bash
-./start_gui.sh                       # last-used project / ask
-./start_gui.sh --root /path/to/proj  # explicit project
-```
-
-First time only, set up the two environments:
-
-```bash
-# backend (Python venv)
+# 1. backend (Python venv)
 cd backend && python3 -m venv .venv && .venv/bin/pip install -e .
-# release.sh need pyinstaller 
-pip install pyinstaller 
+# 2. gui (Node 20+, e.g. via nvm)
+cd ../gui && npm install
 
-# gui (Node 20+, via nvm)
-cd gui && npm install
+# run
+cd .. && ./start_gui.sh                       # last-used project / ask
+./start_gui.sh --root /path/to/proj           # explicit project
 ```
 
 国内需要mirror才能下载。在你的项目根目录（即 package.json 所在的 gui 文件夹）创建或编辑 .npmrc 文件。
@@ -50,6 +50,50 @@ cd gui && npm install
 registry=https://registry.npmmirror.com
 electron_mirror=https://npmmirror.com/mirrors/electron/
 ```
+
+### Windows
+
+```bat
+:: 1. backend (Python venv; python must be 3.11+)
+cd backend
+python -m venv .venv
+.venv\Scripts\pip install -e .
+:: 2. gui (Node 20+ on PATH)
+cd ..\gui
+npm install
+
+:: run (from the repo root)
+start_gui.bat
+start_gui.bat --root C:\path\to\project
+```
+
+Notes:
+
+- The GUI locates the backend at `backend\.venv\Scripts\python.exe`
+  automatically; if it is missing it falls back to `python` on PATH (the
+  `coder_agent` package must then be importable).
+- `--no-sandbox` is not needed on Windows (it is a Linux/root concern), so
+  `start_gui.bat` does not pass it.
+- The CDP smoke tests (`cdp_*_test.cjs`) are cross-platform: on Windows they
+  use `netstat`/`taskkill` instead of `ss`/process groups.
+- The `debug_backtrace` agent tool needs `gdb`, which is Linux-only; on
+  Windows the tool reports a friendly "gdb is not installed" error and the
+  agent falls back to `run_command`.
+
+### Tests
+
+```bash
+# Linux: everything (backend pytest + all GUI CDP smoke tests)
+./run_tests.sh
+
+# Windows: same, in a cmd prompt
+run_tests.bat
+```
+
+Individual targets: `backend`, `gui`, `remote` (needs a standalone server on
+`127.0.0.1:8931`), or a single GUI test name (`boot`, `theme`, `split`, ...).
+`cd gui && node run_all_tests.cjs [names...]` runs the CDP suite directly
+(starts the remote server itself for the `remote` test).
 
 ## Status (phased build)
 
