@@ -136,6 +136,19 @@ Notes:
 - Packaged AppImage needs none of this: electron-builder generates the `.desktop` with
   the icon from `linux.icon`.
 
+## 4b. Decision for agent_ts_gui: dev mode does NOT manage a .desktop
+
+After the clobber pitfall below, the project's final design is: **only the
+packaged app is pin-able**. `start_gui.sh` (dev) installs no `.desktop` entry
+and launches Electron with its default WM_CLASS (generic dock icon in dev -
+accepted cost). `release/coder-agent` (the plain-name launcher) owns
+`~/.local/share/applications/coder-agent.desktop`: it rewrites the entry on
+EVERY start with `Exec=<versionless launcher>` (pin survives upgrades),
+`Icon=<unpacked dir>/resources/icon.png`, `StartupWMClass=CoderAgent`, and
+launches the AppImage with `--class=CoderAgent`. Note the AppImage's own
+electron-builder entry uses `StartupWMClass=Coder Agent` (with a space, from
+productName) - Electron's WM_CLASS matching needs the no-space custom class.
+
 ## 5. Pinning the AppImage to the dock (and the .desktop clobber pitfall)
 
 GNOME dock icons are not direct AppImage launches: clicking a dock icon executes the

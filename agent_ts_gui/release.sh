@@ -49,11 +49,32 @@ cp gui/build-resources/backend/coder-agent-server "$OUTDIR/coder-agent-server-${
 # AppImage, see guide.txt). rm -f first: an old "coder-agent" may be a
 # symlink pointing AT the AppImage, and "cat >" would follow it.
 rm -f "$OUTDIR/coder-agent"
+# The launcher also owns ~/.local/share/applications/coder-agent.desktop so the
+# app can be pinned to the dock and re-launched from it:
+#   - Exec= points at THIS versionless launcher, so the pin survives upgrades
+#   - StartupWMClass=CoderAgent matches the --class=CoderAgent we pass to the
+#     AppImage (the AppImage's own entry says "Coder Agent" with a space, which
+#     GNOME's WM_CLASS matching does not use for Electron)
+#   - Icon= uses the current version's unpacked icon.png; the entry is
+#     rewritten on every start, so the path is always up to date
+# Dev mode (start_gui.sh) must NOT touch this file (see its comment).
 cat > "$OUTDIR/coder-agent" <<EOF
 #!/usr/bin/env bash
 # GUI 默认后台启动: terminal 立即返回, 关闭 terminal 也不会杀掉程序
 DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-nohup "\$DIR/coder-agent-${VER}.AppImage" --no-sandbox "\$@" >>"\$DIR/coder-agent.log" 2>&1 &
+# keep the dock/pin entry valid (stable Exec, no version in the name)
+mkdir -p "\$HOME/.local/share/applications"
+cat > "\$HOME/.local/share/applications/coder-agent.desktop" <<DESKTOPEOF
+[Desktop Entry]
+Type=Application
+Name=Coder Agent
+Comment=AI coding agent (Electron GUI + Python backend)
+Exec=\$DIR/coder-agent
+Icon=\$DIR/coder-agent-${VER}-linux/resources/icon.png
+StartupWMClass=CoderAgent
+DESKTOPEOF
+update-desktop-database "\$HOME/.local/share/applications" 2>/dev/null || true
+nohup "\$DIR/coder-agent-${VER}.AppImage" --no-sandbox --class=CoderAgent "\$@" >>"\$DIR/coder-agent.log" 2>&1 &
 echo "coder-agent started in background (pid \$!, log \$DIR/coder-agent.log)"
 EOF
 chmod +x "$OUTDIR/coder-agent"

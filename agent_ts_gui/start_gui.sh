@@ -15,29 +15,14 @@ export NVM_DIR="$HOME/.nvm"
 cd gui
 npm run build
 
-# --- app icon on Linux (GNOME dock / taskbar) --------------------------------
-# The dock does NOT use the window icon; it matches the window's WM_CLASS
-# against a .desktop entry. Electron's default WM_CLASS is "electron", so
-# install a "CoderAgent" .desktop entry (with our icon) and start with
-# --class=CoderAgent so the dock shows the CC icon instead of the system default.
-if [ "$(uname)" = "Linux" ]; then
-  DESKTOP_DIR="$HOME/.local/share/applications"
-  mkdir -p "$DESKTOP_DIR"
-  # Never clobber a real launcher entry (e.g. "Exec=<...>.AppImage" created when
-  # the user pinned the AppImage to the dock) - that would turn the dock icon
-  # into a no-op (/bin/true).
-  if [ ! -f "$DESKTOP_DIR/coder-agent.desktop" ] || grep -q "^Exec=/bin/true" "$DESKTOP_DIR/coder-agent.desktop"; then
-    cat > "$DESKTOP_DIR/coder-agent.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Coder Agent
-Comment=AI coding agent (Electron GUI + Python backend)
-Exec=/bin/true
-Icon=$PWD/build-resources/icon-512.png
-StartupWMClass=CoderAgent
-EOF
-    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
-  fi
-fi
+# --- Linux dock / pin: dev mode intentionally does NOT manage a .desktop ----
+# The GNOME dock matches windows to ~/.local/share/applications/*.desktop via
+# WM_CLASS. The PACKAGED app (release/coder-agent) owns "coder-agent.desktop"
+# (StartupWMClass=CoderAgent) so it can be pinned and re-launched from the dock.
+# Dev mode must stay out of that file: a dev placeholder (Exec=/bin/true)
+# sharing the filename/WM_CLASS with the AppImage entry clobbered the user's
+# pinned dock entry (click = no-op) and broke the dock icon. Cost: the dev
+# window runs with Electron's default WM_CLASS ("electron") and shows the
+# generic icon in the dock - acceptable for a dev-only build.
 
-exec node_modules/.bin/electron --no-sandbox --disable-gpu --class=CoderAgent . "$@"
+exec node_modules/.bin/electron --no-sandbox --disable-gpu . "$@"
