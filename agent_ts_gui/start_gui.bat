@@ -14,14 +14,17 @@ if errorlevel 1 (
 
 rem --no-sandbox: not needed on Windows (no root sandbox); --disable-gpu keeps
 rem the CDP smoke tests stable on machines without a GPU.
-if not exist "node_modules\.bin\electron.cmd" (
-  echo [start_gui] electron not found: run "npm install" in gui\ first
-  exit /b 1
-)
-if not exist "dist\main\index.js" (
-  echo [start_gui] build output missing (dist\main\index.js) - check the build output above
-  exit /b 1
-)
+if not exist "node_modules\.bin\electron.cmd" goto :electron_missing
+if not exist "dist\main\index.js" goto :build_missing
 rem Pass the app as an ABSOLUTE path: electron's "Unable to find Electron app
 rem at ..." dialog appears when the relative "." does not resolve to this dir.
 node_modules\.bin\electron.cmd --disable-gpu "%CD%" %*
+exit /b
+
+:electron_missing
+echo [start_gui] electron not found: run "npm install" in gui\ first
+exit /b 1
+
+:build_missing
+echo [start_gui] build output missing, dist\main\index.js - check the build output above
+exit /b 1
