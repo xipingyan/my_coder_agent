@@ -1,11 +1,24 @@
 @echo off
 rem Build the Windows NSIS installer for the Coder Agent GUI.
-rem Requirements: Node 20+ and a venv at backend\.venv with PyInstaller
-rem   backend\.venv\Scripts\pip install -e . pyinstaller
+rem Requirements: Node 20+ and a venv at backend\.venv
+rem   (PyInstaller is a build-time tool; it is auto-installed below if missing,
+rem    same as release.sh)
+rem Run from an ELEVATED (administrator) prompt: electron-builder unpacks its
+rem winCodeSign tooling with 7-Zip, which creates symbolic links that a normal
+rem user cannot make ("Cannot create symbolic link : A required privilege is
+rem not held by the client"). Alternatively enable Windows Developer Mode.
 setlocal
 cd /d "%~dp0"
 
 echo ==^> building backend standalone executable
+rem PyInstaller is a build-time tool, not a runtime dependency, so it may be
+rem missing from a freshly created venv - install it automatically (as release.sh does).
+backend\.venv\Scripts\python -m PyInstaller --version >nul 2^>^&1
+if errorlevel 1 (
+  echo PyInstaller not found in backend\.venv, installing...
+  backend\.venv\Scripts\python -m pip install pyinstaller
+  if errorlevel 1 exit /b 1
+)
 backend\.venv\Scripts\python backend\build_standalone.py gui\build-resources\backend
 if errorlevel 1 exit /b 1
 

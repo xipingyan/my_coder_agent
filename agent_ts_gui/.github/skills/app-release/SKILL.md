@@ -51,6 +51,11 @@ release/                  # all artifacts (gitignored)
 - **No cross-compiling**: PyInstaller cannot build a Windows exe on Linux.
   `release.sh` = Linux artifacts only; Windows is always `release.bat` on a
   Windows machine. Never add a `windows` branch to release.sh.
+- **release.bat needs an ELEVATED prompt**: electron-builder unpacks its
+  winCodeSign tooling with 7-Zip, which creates symbolic links; a normal
+  user fails with "Cannot create symbolic link : A required privilege is not
+  held by the client". Run cmd as administrator (or enable Windows Developer
+  Mode).
 - **Version comes from one place**: `gui/package.json` version. Bump it and
   every artifact name follows. `artifactName: "${name}-${version}.${ext}"`
   in the electron-builder config is what produces `coder-agent-<ver>.AppImage`.

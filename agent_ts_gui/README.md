@@ -177,8 +177,9 @@ locates and spawns it automatically (see `gui/src/main/index.ts:backendInfo`).
 ### Building the packages
 
 ```bash
-# one-time: PyInstaller in the backend venv
-cd backend && python3 -m venv .venv && .venv/bin/pip install -e . pyinstaller
+# one-time: backend venv (PyInstaller is auto-installed by the release
+# scripts if missing, since it is a build-time tool, not a runtime dep)
+cd backend && python3 -m venv .venv && .venv/bin/pip install -e .
 
 # Linux (build on Linux x86_64)
 ./release.sh           # -> release/coder-agent-<ver>.AppImage
@@ -190,6 +191,15 @@ release.bat            # -> release/coder-agent-<ver>.exe
 `release.sh` takes no arguments — it always builds the Linux AppImage.
 The Windows installer is only built by `release.bat`, which must be run on
 Windows (PyInstaller cannot cross-compile the backend).
+
+**Windows: run `release.bat` from an ELEVATED (administrator) prompt.**
+electron-builder unpacks its winCodeSign tooling with 7-Zip, which creates
+symbolic links (e.g. `darwin/10.12/lib/libcrypto.dylib`); a normal user
+lacks that privilege and the build dies with
+`Cannot create symbolic link : A required privilege is not held by the
+client`. Fix: right-click cmd → "Run as administrator", then `release.bat`
+(alternatively enable Windows Developer Mode, which grants normal users
+symlink creation).
 
 What the script does:
 
