@@ -204,7 +204,7 @@ DEFAULT_CONFIRM = [
     "pip", "pip3", "python -m pip", "python3 -m pip", "npm install", "npm i", "npm publish", "yarn", "pnpm",
     "apt", "apt-get", "dpkg", "dnf", "yum", "pacman", "brew", "snap", "docker", "podman",
     "kill", "pkill", "killall", "systemctl", "service", "mount", "umount", "chown", "chroot", "crontab",
-    "eval", "exec", "source",
+    "eval", "exec",
     "git push", "git reset", "git clean", "git checkout", "git restore", "git rebase", "git stash drop",
     "git branch -D", "git remote", "git clone", "git fetch", "git pull",
 ]

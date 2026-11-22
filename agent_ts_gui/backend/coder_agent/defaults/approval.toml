@@ -26,6 +26,7 @@ trusted = ["/tmp",
 default = "ask"            # ask | deny
 allow = [
     "ls", "pwd", "cd", "cat", "head", "tail", "wc", "echo", "which", "tree", "diff", "stat", "file",
+    "source",
     "grep", "rg", "sort", "uniq",
     "git status", "git diff", "git log", "git show", "git branch", "git rev-parse",
     "cmake --version", "cmake -S", "cmake -B", "cmake --build", "ctest",
