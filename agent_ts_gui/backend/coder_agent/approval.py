@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import ipaddress
 import os
 import re
 import shlex
@@ -199,8 +200,9 @@ def ensure_user_policy() -> Path:
 DEFAULT_TRUSTED = ["/tmp"]
 # Commands that never run automatically just because their paths are trusted (network, installs,
 # processes, history rewriting). An explicit [commands].allow rule still wins.
+# curl/wget are NOT here: downloads are allowed (see _DOWNLOAD_CMDS / _url_host below).
 DEFAULT_CONFIRM = [
-    "curl", "wget", "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp",
+    "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp",
     "pip", "pip3", "python -m pip", "python3 -m pip", "npm install", "npm i", "npm publish", "yarn", "pnpm",
     "apt", "apt-get", "dpkg", "dnf", "yum", "pacman", "brew", "snap", "docker", "podman",
     "kill", "pkill", "killall", "systemctl", "service", "mount", "umount", "chown", "chroot", "crontab",
@@ -212,7 +214,28 @@ _DESTRUCTIVE = {"rm", "rmdir", "mv", "unlink", "shred", "truncate"}
 _SAFE_DEVICES = {"/dev/null", "/dev/stdout", "/dev/stderr"}
 _DYNAMIC = re.compile(r"\$[\w{(]")
 _URL = re.compile(r"\w+://|\w+@[\w.-]+:")
-_ABS_IN_TOKEN = re.compile(r"(?:^|[\s'\"=:(,])(~?/[^\s'\"`;|&<>(),:]*)")
+
+
+def _url_host(tok: str) -> Optional[str]:
+    """The host of a URL / scp-style target, lowercased, without port (None if unparseable)."""
+    m = re.search(r"\w+://([^/\s?#:]+)", tok)
+    if m:
+        return m.group(1).lower()
+    m = re.search(r"\w+@([\w.-]+):", tok)
+    return m.group(1).lower() if m else None
+
+
+def _is_intranet(host: str) -> bool:
+    """True for loopback / RFC1918 / link-local hosts (intranet: always auto-approved)."""
+    if host in ("localhost", "localhost.localdomain"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
+
+
+_ABS_IN_TOKEN = re.compile(r"(?:^|[\s'\"=:(,])(?<!:)(~?/[^\s'\"`;|&<>(),:]*)")  # (?<!:) skips the "//host" of URLs
 
 
 class _Unresolvable(Exception):
@@ -230,7 +253,10 @@ def _path_candidates(tok: str) -> list[str]:
     if _DYNAMIC.search(tok):
         raise _Unresolvable(f"'{tok}' uses a variable")
     if _URL.search(tok):
-        raise _Unresolvable(f"'{tok}' is a network address")
+        host = _url_host(tok)
+        if host is not None and not _is_intranet(host):
+            raise _Unresolvable(f"'{host}' is an external network address")
+        # intranet (loopback / RFC1918 / link-local) addresses are exempt
     out: list[str] = []
     if not any(ch.isspace() for ch in tok) and (tok.startswith(("/", "~", ".")) or "/" in tok):
         out.append(tok)

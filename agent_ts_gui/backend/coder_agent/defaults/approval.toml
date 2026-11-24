@@ -8,7 +8,9 @@
 #
 # Trusted paths: file writes and commands whose paths (arguments, redirect targets, working
 # directory after `cd`) all lie inside the project root or one of [paths].trusted run WITHOUT asking,
-# except commands listed in [commands].confirm (network, installs, killing processes, git push ...).
+# except commands listed in [commands].confirm (installs, killing processes, git push ...).
+# Network: intranet hosts (localhost, 127.0.0.0/8, 10/172.16/192.168 RFC1918, 169.254 link-local)
+# are always auto-approved; external hosts (curl/wget downloads, git fetch/pull ...) always ask.
 #
 # This file is the user-wide policy. A project can add rules in <project>/.agent/approval.toml
 # (lists are merged, scalars are overridden). The agent can never edit these two files without asking.

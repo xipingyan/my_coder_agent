@@ -67,6 +67,32 @@ def test_unsafe_commands_still_ask(tmp_path):
     assert d.action == "ask", d
 
 
+def test_intranet_urls_are_allowed(tmp_path):
+    """Intranet hosts (localhost / loopback / RFC1918) are auto-approved, incl. curl/wget."""
+    p = _policy(tmp_path)
+    for cmd in (
+        "curl http://127.0.0.1:8931/health",
+        "curl http://localhost:8931/health",
+        "wget http://192.168.1.10/file.tar.gz -O build/file.tar.gz",
+        "curl http://10.0.0.5:8080/api",
+        "curl http://172.16.4.2:9000/x",
+    ):
+        d = p.check_command(cmd, cwd=tmp_path)
+        assert d.action == "allow", (cmd, d)
+
+
+def test_external_urls_still_ask(tmp_path):
+    """External (non-intranet) hosts always ask, even for curl/wget downloads."""
+    p = _policy(tmp_path)
+    for cmd in (
+        "curl https://example.com/file.tar.gz -O build/file.tar.gz",
+        "wget http://1.2.3.4/file.tar.gz",
+        "curl http://public.example.org:8080/x",
+    ):
+        d = p.check_command(cmd, cwd=tmp_path)
+        assert d.action == "ask", (cmd, d)
+
+
 def test_deny_rules_still_win(tmp_path):
     p = _policy(tmp_path, auto_approve_all=True)
     d = p.check_command("sudo ls", cwd=tmp_path)
