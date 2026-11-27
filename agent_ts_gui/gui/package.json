@@ -21,6 +21,8 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "highlight.js": "^11.12.0",
+    "marked": "^18.2.1",
     "ws": "^8.22.1"
   },
   "build": {
@@ -40,12 +42,18 @@
       }
     ],
     "linux": {
-      "target": ["AppImage", "dir"],
+      "target": [
+        "AppImage",
+        "dir"
+      ],
       "category": "Development",
       "icon": "build-resources/icon-512.png"
     },
     "win": {
-      "target": ["nsis", "dir"],
+      "target": [
+        "nsis",
+        "dir"
+      ],
       "icon": "build-resources/icon.ico"
     },
     "artifactName": "${name}-${version}.${ext}",

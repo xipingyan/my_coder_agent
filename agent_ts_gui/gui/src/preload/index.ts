@@ -1,5 +1,5 @@
 // Preload: type-safe bridge between renderer and main.
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, shell } from "electron";
 import type { AgentEvent, ReplyMsg } from "../types";
 
 contextBridge.exposeInMainWorld("api", {
@@ -24,4 +24,5 @@ contextBridge.exposeInMainWorld("api", {
   winToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("win-toggle-maximize"),
   winIsMaximized: (): Promise<boolean> => ipcRenderer.invoke("win-is-maximized"),
   winClose: (): Promise<void> => ipcRenderer.invoke("win-close"),
+  openExternal: (url: string): void => shell.openExternal(url),
 });

@@ -35,6 +35,7 @@ export interface Api {
   winToggleMaximize: () => Promise<boolean>;
   winIsMaximized: () => Promise<boolean>;
   winClose: () => Promise<void>;
+  openExternal: (url: string) => void;
 }
 
 export interface Connection {

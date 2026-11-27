@@ -1,5 +1,7 @@
 // Coder Agent GUI - main window: layout, RPC client, live event rendering.
 import type { AgentEvent, ReplyMsg } from "../types";
+import { marked } from "marked";
+import hljs from "highlight.js";
 
 // ------------------------------------------------------------------ helpers
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -42,6 +44,32 @@ function fmtTok(n: number): string {
   return n >= 1024 ? `${(n / 1024).toFixed(1)}k` : String(Math.round(n));
 }
 
+// ------------------------------------------------------------- markdown
+// The chat renders user prompts and assistant replies as markdown (marked),
+// with syntax highlighting for fenced code (highlight.js). The source text is
+// HTML-escaped BEFORE parsing, so nothing in the model output can inject
+// markup: <file ...> attachments, HTML in prompts, etc. all show as text.
+// marked v18: a partial renderer passed to marked.use() is merged, so only
+// the code hook needs to be provided.
+marked.use({
+  gfm: true,
+  renderer: {
+    code({ text, lang }) {
+      const raw = String(text)
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&");
+      const L = lang && hljs.getLanguage(lang) ? lang : "plaintext";
+      const html = hljs.highlight(raw, { language: L, ignoreIllegals: true }).value;
+      return `<pre><code class="lang-${L}">${html}</code></pre>`;
+    },
+  },
+});
+
+function mdToHtml(text: string): string {
+  return marked.parse(esc(String(text))) as string;
+}
+
 // log panes: append-only, stick to the bottom while the user is at the bottom
 class Pane {
   el: HTMLElement;
@@ -58,6 +86,37 @@ class Pane {
   }
   line(text = "", cls = "", mono = false) {
     this.write(text + "\n", cls, mono);
+  }
+  // A markdown block: a <div class="md"> that is re-rendered from the
+  // accumulated raw text on every append (used for streaming replies).
+  mdBlock(): { append: (text: string) => void; el: HTMLElement } {
+    const atBottom = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight < 8;
+    const div = document.createElement("div");
+    div.className = "md";
+    let acc = "";
+    const render = () => {
+      div.innerHTML = mdToHtml(acc);
+      if (atBottom) this.el.scrollTop = this.el.scrollHeight;
+    };
+    this.el.appendChild(div);
+    render();
+    // markdown links open in the OS browser, never inside the app window
+    div.addEventListener("click", (e) => {
+      const a = (e.target as HTMLElement).closest("a");
+      if (!a) return;
+      const href = a.getAttribute("href") ?? "";
+      if (!/^(https?:|mailto:)/i.test(href)) return;
+      e.preventDefault();
+      // recorded for CDP tests (window.api is a frozen contextBridge object,
+      // so it cannot be stubbed from the page)
+      (window as any).__mdOpenRequests = (window as any).__mdOpenRequests ?? [];
+      (window as any).__mdOpenRequests.push(href);
+      window.api?.openExternal(href);
+    });
+    return {
+      append: (text: string) => { acc += text; render(); },
+      el: div,
+    };
   }
 }
 
@@ -86,6 +145,7 @@ const S = {
   thinkChars: 0,
   block: null as string | null,
   blockFirst: false,
+  mdBlock: null as { append: (text: string) => void; el: HTMLElement } | null,
   pendingDocs: new Map<string, string>(),
   planDict: null as Record<string, any> | null,
 };
@@ -284,6 +344,7 @@ function resetViews() {
   S.planDict = null;
   S.pendingDocs.clear();
   S.block = null;
+  S.mdBlock = null;
   S.thinkChars = 0;
   $("llm-label").textContent = "";
   setState("idle", "");
@@ -294,6 +355,7 @@ function chatTool(name: string, args: Record<string, any>, agent = "main") {
   const who = agent === "main" ? "" : `[${agent}] `;
   chat.line(`\n> ${who}${name}  ${short(argsSummary(name, args), 160)}`, "c-tool", true);
   S.block = null;
+  S.mdBlock = null;
 }
 
 function chatResult(ok: boolean, text: string) {
@@ -302,12 +364,12 @@ function chatResult(ok: boolean, text: string) {
 
 function renderTurn(t: { prompt: string; task_type: string; messages: any[]; status: string; created?: number }) {
   chat.line(`\nYou  [${t.task_type}]${t.created ? "  " + stampOf(t.created) : ""}`, "c-user");
-  chat.line(t.prompt);
+  chat.mdBlock().append(t.prompt);
   for (const m of t.messages) {
     if (m.role === "assistant") {
       if (m.content) {
         chat.line("\nAssistant", "c-ok b");
-        chat.line(String(m.content).replace(/^\n+/, ""));
+        chat.mdBlock().append(String(m.content).replace(/^\n+/, ""));
       }
       for (const tc of m.tool_calls ?? []) {
         let args: any = {};
@@ -1474,10 +1536,11 @@ function onEvent(ev: AgentEvent) {
   const d = ev.data;
   if (k === "turn_started") {
     S.block = null;
+    S.mdBlock = null;
     thinking.clear();
     S.thinkChars = 0;
     chat.line(`\nYou  [${d.task_type}]  ${stampOf(ev.ts)}`, "c-user");
-    chat.line(d.prompt);
+    chat.mdBlock().append(d.prompt);
     log(ev, `task type ${d.task_type}`);
     refreshTurnList();
     refreshSessionList();
@@ -1493,7 +1556,12 @@ function onEvent(ev: AgentEvent) {
     }
     // the header line already ends with a newline; drop the leading newlines
     // of the first content chunk so there is no double blank line
-    chat.write(S.blockFirst ? (d.text ?? "").replace(/^\n+/, "") : d.text);
+    if (S.blockFirst) {
+      S.mdBlock = chat.mdBlock();
+      S.mdBlock.append((d.text ?? "").replace(/^\n+/, ""));
+    } else {
+      S.mdBlock?.append(d.text ?? "");
+    }
     S.blockFirst = false;
   } else if (k === "tool_call") {
     chatTool(d.name, d.args ?? {}, ev.agent_id);
@@ -1562,6 +1630,7 @@ function onEvent(ev: AgentEvent) {
     if (k === "stage_started") {
       chat.line(`\n== stage ${d.index + 1}/${d.total}: ${(d.ids ?? []).join(", ") || "nothing to run"} ==`, "c-tool b");
       S.block = null;
+      S.mdBlock = null;
     }
   } else if (k === "doc_analysis") {
     docs.line(`=== ${d.subtask}: ${(d.docs ?? []).join(", ")}  (${d.source}) ===`, "b", true);
