@@ -1,3 +1,0 @@
-[console_scripts]
-coder-agent-cli = coder_agent.cli:main
-coder-agent-stress = coder_agent.stress:main
