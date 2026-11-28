@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -162,7 +163,7 @@ class Engine:
             except (PlanError, LLMError) as e:
                 text = f"Planning failed: {e}"
                 self.bus.emit("error", "planner", text=text)
-            turn.messages.append({"role": "assistant", "content": text})
+            turn.messages.append({"role": "assistant", "content": text, "ts": time.time()})
             self.session.finish_turn(turn, status, text)
             self.bus.emit("turn_finished", turn_id=turn.id, status=status, error="")
             self.bus.emit("status", state="idle", detail="")

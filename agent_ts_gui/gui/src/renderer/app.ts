@@ -368,7 +368,8 @@ function renderTurn(t: { prompt: string; task_type: string; messages: any[]; sta
   for (const m of t.messages) {
     if (m.role === "assistant") {
       if (m.content) {
-        chat.line("\nAssistant", "c-ok b");
+        // m.ts is set for new sessions; old saved sessions fall back to the turn's start time
+        chat.line(`\nAssistant${m.ts ? "  " + stampOf(m.ts) : t.created ? "  " + stampOf(t.created) : ""}`, "c-ok b");
         chat.mdBlock().append(String(m.content).replace(/^\n+/, ""));
       }
       for (const tc of m.tool_calls ?? []) {

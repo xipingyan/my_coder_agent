@@ -51,7 +51,8 @@ class OpenAICompatProvider(LLMProvider):
     ) -> dict:
         kw: dict = {
             "model": self.server.model,
-            "messages": messages,
+            # "ts" is display-only (timestamps for replaying old sessions): never send it to the API
+            "messages": [{k: v for k, v in m.items() if k != "ts"} for m in messages],
             "stream": True,
             "stream_options": {"include_usage": True},
         }

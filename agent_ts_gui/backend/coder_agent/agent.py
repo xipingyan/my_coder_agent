@@ -309,7 +309,7 @@ class Agent:
                 if not calls and text:
                     text, calls = extract_text_tool_calls(text, known)
 
-                msg: dict = {"role": "assistant", "content": text}
+                msg: dict = {"role": "assistant", "content": text, "ts": time.time()}
                 if calls:
                     msg["tool_calls"] = [
                         {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
